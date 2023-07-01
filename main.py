@@ -3,6 +3,7 @@ import time
 import json
 import re
 import selenium.webdriver.support.expected_conditions as EC
+from dateutil.parser import isoparse
 from selenium.webdriver.common.by import By
 from selenium.webdriver.support.wait import WebDriverWait
 from PIL import Image
@@ -41,6 +42,15 @@ def make_driver():
     """
     driver = uc.Chrome(headless=False,use_subprocess=False)
     return driver
+
+def swap_to_iframe(driver, iframe_class="flippiframe.mainframe"):
+    driver.switch_to.default_content()
+    # Switch to the iframe
+    iframe = driver.find_element(By.CLASS_NAME, iframe_class)
+    # then find frame and swap
+    driver.switch_to.frame(iframe)
+
+
 def get_walmart():
     """
     Get the information about Walmart.
@@ -62,8 +72,7 @@ def get_walmart():
     main_element = WebDriverWait(driver, 10).until(EC.visibility_of_element_located((By.TAG_NAME, "main")))
     time.sleep(5)
     # Switch to the iframe
-    iframe = main_element.find_element(By.CLASS_NAME, "flippiframe.mainframe")
-    driver.switch_to.frame(iframe)
+    swap_to_iframe(driver)
     # save content as data/walmart.html
     cookies = driver.get_cookies()
     # save cookies are cookies.json
@@ -92,28 +101,72 @@ def get_walmart():
         print("Found flyer")
     else:
         raise Exception("Could not find flyer images")
-
-    for flyer_image in flyer_images:
+    data = []
+    # close modal if present
+    # make a new dataframe
+    for findex, flyer_image in enumerate(flyer_images):
         # time sleep 5
         # get each button from flyer
+        driver.execute_script("arguments[0].scrollIntoView();", flyer_image)
         buttons = flyer_image.find_elements(By.TAG_NAME, "button")
+        # extract path from flyer_image
+        # <sfml-flyer-image impressionable="" width="27064" height="2560" path="flyers/d24a169f-17dd-4c05-b326-87391b598be6/" resolutions="8 5.33 3.7 2.33 1.55 1" src-rect="0 0 975 2560" aspect-ratio="2.6256410256410256" sfml-anchor-id="0" style="width: 100%; height: 1423.1px;"><a wayfinder-anchor="" name="sfml_anchor_0"></a>
+        flyer_path = flyer_image.get_attribute("path")
         # iterate through each button
         for index, button in enumerate(buttons):
-            if index == 0:
-                continue
             # click on button
             # print aria-label for button
-            print(button.get_attribute("aria-label"))
+            print(f"Parsing for button: {button.get_attribute('aria-label')}")
+            label = button.get_attribute("aria-label")
+            data_product_id = button.get_attribute("data-product-id")
+            product_name = label.split(",")[0].strip()
+            # remove Select for details from label
             # scroll so button is centered
             # driver.execute_script("arguments[0].scrollIntoView();", button)
+            savings_regex = re.search(r'Save \$([\d.]+), \$([\d.]+)', label)
+            if savings_regex:
+                savings = float(savings_regex.group(1))
+                current_price = float(savings_regex.group(2))
+            else: 
+                savings = ""
+                current_price = ""
+            label = label.replace("Select for details", "")
             button.click()
             time.sleep(5)
-            # screenshot
-            driver.save_screenshot("data/full_screenshot.png")
+            swap_to_iframe(driver, "flippiframe.productframe")
+            # find translation
+            validity_dates = driver.find_element(By.TAG_NAME, "flipp-validity-dates")
+            start_date = validity_dates.get_attribute("start-date")
+            end_date = validity_dates.get_attribute("end-date")
 
-            exit(1)
-        exit(1)
-    driver.witch_to.default_content()
+            # Parse the date strings into datetime objects if needed
+            # start_date = isoparse(start_date)
+            # end_date = isoparse(end_date)
+            # screenshot
+            driver.save_screenshot(f"data/{data_product_id}.png")
+            swap_to_iframe(driver)
+            data.append({
+                'label': label,
+                'data_product_id': data_product_id,
+                'product_name': product_name,
+                'savings': savings,
+                'current_price': current_price,
+                'start_date': start_date,
+                'end_date': end_date
+            })
+
+            with open('data/data.json', 'w') as f:
+                json.dump(data, f)
+
+            if index >= 2:
+                print("Only scan up to the first 75 items")
+                break
+        if findex >= 2:
+            print("Only scan up to the first 75 items")
+            break
+    with open('data/data.json', 'w') as f:
+        json.dump(data, f)
+    driver.switch_to.default_content()
 
     time.sleep(5)
 
