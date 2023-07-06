@@ -78,15 +78,24 @@ def setup_walmart():
 
 
 def scrap_flyer(driver, cfg: dict):
+    """
+    Scrapes a flipp flyer using a Selenium WebDriver and saves the data to a JSON file.
+
+    Args:
+        driver (WebDriver): The Selenium WebDriver instance.
+        cfg (dict): A dictionary containing configuration parameters.
+
+    Returns:
+        None
+    """
     try:
         main_element = WebDriverWait(driver, 10).until(EC.visibility_of_element_located((By.TAG_NAME, "main")))
     except Exception as e:
         # save page source
-        error_file = cfg.get("error_file", "data/error_walmart.html")
+        error_file = cfg.get("error_file", "error_walmart.html")
         with open(error_file, "w", errors="ignore", encoding="utf-8") as f:
             f.write(driver.page_source)
-        print(e)
-        exit(1)
+        time.sleep(3)
     time.sleep(5)
     # Switch to the iframe
     swap_to_iframe(driver)
@@ -105,7 +114,6 @@ def scrap_flyer(driver, cfg: dict):
     with open(html_file, "w", errors="ignore", encoding="utf-8") as f:
         f.write(html)
 
-    # /html/body/flipp-router/flipp-publication-page/div/div[2]/flipp-sfml-component/sfml-storefront/div/sfml-linear-layout
     main_flyer = driver.find_element(By.XPATH, "/html/body/flipp-router")
     if main_flyer:
         print("Found main flyer")
@@ -114,6 +122,7 @@ def scrap_flyer(driver, cfg: dict):
         raise Exception("Could not find main flyer")
     # click on first item in iframe
 
+    time.sleep(1)
     # get all tags named sfml-flyer-image from main_flyer and loop through them
     flyer_images = main_flyer.find_elements(By.TAG_NAME, "sfml-flyer-image")
     if flyer_images:
@@ -135,7 +144,6 @@ def scrap_flyer(driver, cfg: dict):
         driver.execute_script("arguments[0].scrollIntoView();", flyer_image)
         buttons = flyer_image.find_elements(By.TAG_NAME, "button")
         # extract path from flyer_image
-        # <sfml-flyer-image impressionable="" width="27064" height="2560" path="flyers/d24a169f-17dd-4c05-b326-87391b598be6/" resolutions="8 5.33 3.7 2.33 1.55 1" src-rect="0 0 975 2560" aspect-ratio="2.6256410256410256" sfml-anchor-id="0" style="width: 100%; height: 1423.1px;"><a wayfinder-anchor="" name="sfml_anchor_0"></a>
         flyer_path = flyer_image.get_attribute("path")
         # iterate through each button
         for index, button in enumerate(buttons):
@@ -148,22 +156,41 @@ def scrap_flyer(driver, cfg: dict):
             # remove Select for details from label
             # scroll so button is centered
             # driver.execute_script("arguments[0].scrollIntoView();", button)
-            savings_regex = re.search(save_regex, label)
+            savings_regex = re.search(r'Save \$([\d*?]+), \$([\d.]+)', label)
+            savings = ""
+            current_price = ""
             if savings_regex:
                 savings = float(savings_regex.group(1))
                 current_price = float(savings_regex.group(2))
             else: 
-                savings = ""
-                current_price = ""
+                # if price is not set, scan for numbers, if only one match, then current_price,
+                # if two matches then savings is available as well, second number
+                number_regex = re.findall(r'\$?(\d+(?:\.\d+)?)', label)
+                if number_regex != None:
+                    if len(number_regex) == 1:
+                        current_price = number_regex[0]
+                    elif len(number_regex) == 2:
+                        if "\u00a2" in label:
+                            savings = float(number_regex[0]) * 0.01
+                        else:
+                            savings = number_regex[0]
+                            current_price = number_regex[1]
+                    else:
+                        current_price = ""
 
-            if current_price == "":
+            if current_price == "" or current_price == None:
                 # check for Rollback
                 rollback_regex = re.search(rollbar_regex, label)
                 if rollback_regex:
                     current_price = float(rollback_regex.group(1))
             # pull label from cfg
             label = label.replace(item_text, "")
-            button.click()
+            try:
+                button.click()
+            except Exception as e:
+                print(e)
+                with open(error_file, "w", errors="ignore", encoding="utf-8") as f:
+                    f.write(driver.page_source)
             time.sleep(5)
             swap_to_iframe(driver, "flippiframe.productframe")
             # find translation
@@ -179,6 +206,32 @@ def scrap_flyer(driver, cfg: dict):
             flipp_description = driver.find_element(By.CLASS_NAME, "flipp-description")
             # get text
             description = flipp_description.text
+
+            # scrap size and type, parse from description
+            # look for mL and g following an number
+            size_regex = r"(\d+(?:\.\d+)?)\s*(mL|g)"
+            match = re.search(size_regex, description)
+            if match:
+                size = f"{match.group(0)}" # mL or g
+            else:
+                size = 1
+            quantity_regex = r"(\d+)\s*X\s*(\d+)\s*(mL|g)"
+            match = re.search(quantity_regex, description)
+            if match:
+                quantity = f"{match.group(1)}" # mL or g
+            else: 
+                quantity = 1
+
+            # look for Pack. and Each. in description
+            if "pack" in description.lower():
+                product_type = "pack"
+            elif "each" in description.lower():
+                product_type = "each"
+
+            if "frozen" in description.lower():
+                frozen = True
+            else:
+                frozen = False
             driver.save_screenshot(f"data/{data_product_id}.png")
             swap_to_iframe(driver)
             # attempt to match for words, pack. or each.
@@ -193,8 +246,10 @@ def scrap_flyer(driver, cfg: dict):
                 'start_date': start_date,
                 'end_date': end_date,
                 'description': description,
-                'size': 0,
-                'type': 0,
+                'quantity': quantity,
+                'size': size,
+                'type': product_type,
+                'frozen': frozen,
             })
 
             with open(data_file, 'w') as f:
@@ -208,6 +263,8 @@ def scrap_flyer(driver, cfg: dict):
             break
     with open(data_file, 'w') as f:
         json.dump(data, f)
+
+    print("script done")
     driver.switch_to.default_content()
 def get_walmart():
     """
