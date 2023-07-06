@@ -51,11 +51,16 @@ def swap_to_iframe(driver, iframe_class="flippiframe.mainframe"):
     driver.switch_to.frame(iframe)
 
 
-def get_walmart():
+def setup_walmart():
     """
-    Get the information about Walmart.
+    Sets up the Walmart web scraping environment by:
+    1. Creating a driver using the make_driver() function.
+    2. Navigating to the Walmart flyer page.
+    3. Injecting a cookie with the nearest postal code.
+    4. Refreshing the page to apply the cookie changes.
+    
     Returns:
-        None
+        driver (WebDriver): The WebDriver instance for interacting with the Walmart website.
     """
     driver = make_driver()
 
@@ -66,24 +71,38 @@ def get_walmart():
     }
     # Inject the cookie
     driver.add_cookie(cookie)
-
+    
     # Refresh the page to apply the cookie changes
     driver.refresh()
-    main_element = WebDriverWait(driver, 10).until(EC.visibility_of_element_located((By.TAG_NAME, "main")))
+    return driver
+
+
+def scrap_flyer(driver, cfg: dict):
+    try:
+        main_element = WebDriverWait(driver, 10).until(EC.visibility_of_element_located((By.TAG_NAME, "main")))
+    except Exception as e:
+        # save page source
+        error_file = cfg.get("error_file", "data/error_walmart.html")
+        with open(error_file, "w", errors="ignore", encoding="utf-8") as f:
+            f.write(driver.page_source)
+        print(e)
+        exit(1)
     time.sleep(5)
     # Switch to the iframe
     swap_to_iframe(driver)
     # save content as data/walmart.html
     cookies = driver.get_cookies()
     # save cookies are cookies.json
-    with open("data/cookies.json", "w") as f:
+    cookies_file = cfg.get("cookies_file", "data/cookies.json")
+    with open(cookies_file, "w") as f:
         json.dump(cookies, f)
     
     # get source html for driver
     html = driver.page_source
 
+    html_file = cfg.get("html_file", "data/walmart.html")
     # save to data/html
-    with open("data/walmart.html", "w", errors="ignore", encoding="utf-8") as f:
+    with open(html_file, "w", errors="ignore", encoding="utf-8") as f:
         f.write(html)
 
     # /html/body/flipp-router/flipp-publication-page/div/div[2]/flipp-sfml-component/sfml-storefront/div/sfml-linear-layout
@@ -104,6 +123,12 @@ def get_walmart():
     data = []
     # close modal if present
     # make a new dataframe
+
+    item_text = cfg.get("item_text")
+    rollbar_regex = cfg.get("rollbar_regex")
+    save_regex = cfg.get("save_regex")
+    data_file = cfg.get("data_file")
+    max_items = cfg.get("max_items")
     for findex, flyer_image in enumerate(flyer_images):
         # time sleep 5
         # get each button from flyer
@@ -123,14 +148,21 @@ def get_walmart():
             # remove Select for details from label
             # scroll so button is centered
             # driver.execute_script("arguments[0].scrollIntoView();", button)
-            savings_regex = re.search(r'Save \$([\d.]+), \$([\d.]+)', label)
+            savings_regex = re.search(save_regex, label)
             if savings_regex:
                 savings = float(savings_regex.group(1))
                 current_price = float(savings_regex.group(2))
             else: 
                 savings = ""
                 current_price = ""
-            label = label.replace("Select for details", "")
+
+            if current_price == "":
+                # check for Rollback
+                rollback_regex = re.search(rollbar_regex, label)
+                if rollback_regex:
+                    current_price = float(rollback_regex.group(1))
+            # pull label from cfg
+            label = label.replace(item_text, "")
             button.click()
             time.sleep(5)
             swap_to_iframe(driver, "flippiframe.productframe")
@@ -143,8 +175,15 @@ def get_walmart():
             # start_date = isoparse(start_date)
             # end_date = isoparse(end_date)
             # screenshot
+            # get element by tag name p.flipp-description
+            flipp_description = driver.find_element(By.CLASS_NAME, "flipp-description")
+            # get text
+            description = flipp_description.text
             driver.save_screenshot(f"data/{data_product_id}.png")
             swap_to_iframe(driver)
+            # attempt to match for words, pack. or each.
+            # frozen, true or false
+            
             data.append({
                 'label': label,
                 'data_product_id': data_product_id,
@@ -152,23 +191,46 @@ def get_walmart():
                 'savings': savings,
                 'current_price': current_price,
                 'start_date': start_date,
-                'end_date': end_date
+                'end_date': end_date,
+                'description': description,
+                'size': 0,
+                'type': 0,
             })
 
-            with open('data/data.json', 'w') as f:
+            with open(data_file, 'w') as f:
                 json.dump(data, f)
 
-            if index >= 2:
-                print("Only scan up to the first 75 items")
-                break
-        if findex >= 2:
+            # if index >= 2:
+            #     print("Only scan up to the first 75 items")
+            #     break
+        if len(data) >= max_items:
             print("Only scan up to the first 75 items")
             break
-    with open('data/data.json', 'w') as f:
+    with open(data_file, 'w') as f:
         json.dump(data, f)
     driver.switch_to.default_content()
+def get_walmart():
+    """
+    Get the information about Walmart.
+    Returns:
+        None
+    """
 
-    time.sleep(5)
+    driver = setup_walmart()
+    cfg = {
+        'url': "https://www.walmart.ca/flyer?locale=en&icid=home+page_HP_Header_Groceries_WM",
+        'postal_code': "V5H 4M1",
+        'error_file': "data/error_walmart.html",
+        'cookies_file': "data/cookies.json",
+        'html_file': "data/walmart.html",
+        'data_file': "data/walmart.json",
+        'item_text': 'Select for details',
+        'rollbar_regex': r'Rollback, (\d+)',
+        'save_regex': r'Save \$([\d.]+), \$([\d.]+)',
+        'max_items': 50,
+    }
+    scrap_flyer(driver, cfg)
+    
 
 if __name__ == '__main__':    
     get_walmart()
