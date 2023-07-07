@@ -2,11 +2,19 @@ import undetected_chromedriver as uc
 import time
 import json
 import re
+import argparse
 import selenium.webdriver.support.expected_conditions as EC
 from dateutil.parser import isoparse
 from selenium.webdriver.common.by import By
 from selenium.webdriver.support.wait import WebDriverWait
 from PIL import Image
+
+# refactor this code later
+from enum import Enum
+class StoreType(Enum):
+    SAVEON = 'saveon'
+    WALMART = 'walmart'
+    SUPERSTORE = 'superstore'
 
 def calc_location_styles_from_button(element):
     style = element.get_attribute('style')
@@ -36,8 +44,7 @@ def calc_location_styles_from_button(element):
 def make_driver():
     """
     Create and configure a Chrome WebDriver instance with a headless option and a subprocess option disabled.
-    Inject a cookie with the name 'walmart.nearestPostalCode' and the value 'V5H 4M1'.
-    Refresh the page to apply the cookie changes.
+
     Return the configured WebDriver instance.
     """
     driver = uc.Chrome(headless=False,use_subprocess=False)
@@ -50,6 +57,30 @@ def swap_to_iframe(driver, iframe_class="flippiframe.mainframe"):
     # then find frame and swap
     driver.switch_to.frame(iframe)
 
+
+
+def selenium_setup_walmart():
+    # setup selenium manually by entering postal code
+    driver = make_driver()
+    driver.get("https://www.walmart.ca/flyer?flyer_type=walmartcanada&store_code=1213&locale=en")
+    # driver.get("https://www.walmart.ca/en/stores-near-me")
+
+    # # input postal code into sfa-search__input
+    # # clear sfa-search__input
+    # driver.find_element(By.CLASS_NAME, "sfa-search__input").clear()
+    # time.sleep(1)
+    # driver.find_element(By.CLASS_NAME, "sfa-search__input").send_keys("V5H4M1")
+    # time.sleep(1)
+    # # click on sfa-wm-btn sfa-search__btn search-btn
+    # driver.find_element(By.CLASS_NAME, "sfa-search__btn").click()
+    # time.sleep(3)
+    # # click on first element
+    # driver.find_element(By.CLASS_NAME, "sfa-store-list-item__name").click()
+    # time.sleep(2)
+    # # find link header-flyers
+    # driver.find_element(By.LINK_TEXT, "Flyers").click()
+    # time.sleep(2)
+    return driver
 
 def setup_walmart():
     """
@@ -64,13 +95,31 @@ def setup_walmart():
     """
     driver = make_driver()
 
-    driver.get("https://www.walmart.ca/flyer?locale=en&icid=home+page_HP_Header_Groceries_WM")
+    driver.get("https://www.walmart.ca/flyer?flyer_type=walmartcanada&store_code=1213&locale=en")
     cookie = {
         'name': 'walmart.nearestPostalCode',
-        'value': 'V5H 4M1',
+        'value': 'V5H4M1',
     }
     # Inject the cookie
     driver.add_cookie(cookie)
+
+    shipping_address = {
+        "name": "walmart.shippingPostalCode",
+        "value": "V5H4M1"
+    }
+    driver.add_cookie(shipping_address)
+
+    preferred_store = {
+        'name': "walmart.preferredstore",
+        'value': "1213"
+    }
+
+    geolocation_cookie = {
+        'name': "walmart.nearestLatLng",
+        'value': '"49.2311,-122.956"'
+    }
+
+    driver.add_cookie(preferred_store)
     
     # Refresh the page to apply the cookie changes
     driver.refresh()
@@ -138,6 +187,13 @@ def scrap_flyer(driver, cfg: dict):
     save_regex = cfg.get("save_regex")
     data_file = cfg.get("data_file")
     max_items = cfg.get("max_items")
+
+    # look for acsCloseButton acsAbandonButton and click it
+    try:
+        activeModal = driver.find_element(By.CLASS_NAME, "acsCloseButton")
+        activeModal.click()
+    except Exception as e:
+        print("No active modal found")
     for findex, flyer_image in enumerate(flyer_images):
         # time sleep 5
         # get each button from flyer
@@ -156,7 +212,7 @@ def scrap_flyer(driver, cfg: dict):
             # remove Select for details from label
             # scroll so button is centered
             # driver.execute_script("arguments[0].scrollIntoView();", button)
-            savings_regex = re.search(r'Save \$([\d*?]+), \$([\d.]+)', label)
+            savings_regex = re.search(save_regex, label)
             savings = ""
             current_price = ""
             if savings_regex:
@@ -189,8 +245,12 @@ def scrap_flyer(driver, cfg: dict):
                 button.click()
             except Exception as e:
                 print(e)
+                error_file = cfg.get("error_file", "error_walmart.html")
                 with open(error_file, "w", errors="ignore", encoding="utf-8") as f:
                     f.write(driver.page_source)
+                # activeModal = driver.find_element(By.CLASS_NAME, "acsCloseButton.acsAbandonButton")
+                # activeModal.click()
+                exit(1)
             time.sleep(5)
             swap_to_iframe(driver, "flippiframe.productframe")
             # find translation
@@ -232,6 +292,14 @@ def scrap_flyer(driver, cfg: dict):
                 frozen = True
             else:
                 frozen = False
+            time.sleep(1)
+            # get link by class see-more-link and extract href property
+            try:
+                see_more_ele = driver.find_element(By.CLASS_NAME, "see-more-link")
+                see_more_link = see_more_ele.get_attribute("href")
+            except Exception as e:
+                see_more_link = ""
+                print(e)
             driver.save_screenshot(f"data/{data_product_id}.png")
             swap_to_iframe(driver)
             # attempt to match for words, pack. or each.
@@ -250,6 +318,8 @@ def scrap_flyer(driver, cfg: dict):
                 'size': size,
                 'type': product_type,
                 'frozen': frozen,
+                'flyer_url': flyer_path,
+                'url': see_more_link
             })
 
             with open(data_file, 'w') as f:
@@ -273,7 +343,7 @@ def get_walmart():
         None
     """
 
-    driver = setup_walmart()
+    driver = selenium_setup_walmart()
     cfg = {
         'url': "https://www.walmart.ca/flyer?locale=en&icid=home+page_HP_Header_Groceries_WM",
         'postal_code': "V5H 4M1",
@@ -283,11 +353,31 @@ def get_walmart():
         'data_file': "data/walmart.json",
         'item_text': 'Select for details',
         'rollbar_regex': r'Rollback, (\d+)',
-        'save_regex': r'Save \$([\d.]+), \$([\d.]+)',
+        'save_regex': r'Save \$([\d*?]+), \$([\d.]+)',
         'max_items': 50,
     }
     scrap_flyer(driver, cfg)
     
 
-if __name__ == '__main__':    
-    get_walmart()
+def main(args):
+    if type_value == StoreType.SAVEON:
+        # Do something for saveon option
+        pass
+    elif type_value == StoreType.WALMART:
+        # Do something for walmart option
+        get_walmart()
+    elif type_value == StoreType.SUPERSTORE:
+        # Do something for superstore option
+        raise Exception("Not implemented yet")
+
+if __name__ == '__main__':
+    # argparser with the following arguments type
+    parser = argparse.ArgumentParser()
+    # argument type with 3 options: saveon, walmart, and superstore
+    parser.add_argument("type", type=str, choices=['saveon', 'walmart', 'superstore'], default="walmart")
+
+    # Parse the command-line arguments
+    args = parser.parse_args()
+
+    # Access the value of the "type" argument
+    main(args)
