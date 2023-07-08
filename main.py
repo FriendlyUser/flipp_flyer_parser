@@ -7,6 +7,7 @@ import selenium.webdriver.support.expected_conditions as EC
 from dateutil.parser import isoparse
 from selenium.webdriver.common.by import By
 from selenium.webdriver.support.wait import WebDriverWait
+from selenium.common.exceptions import NoSuchElementException
 from PIL import Image
 
 # refactor this code later
@@ -59,27 +60,19 @@ def swap_to_iframe(driver, iframe_class="flippiframe.mainframe"):
 
 
 
+def selenium_setup_saveon():
+    # setup selenium manually by entering postal code
+    driver = make_driver()
+    driver.get("https://www.saveonfoods.com/sm/pickup/rsid/907/circular")
+    # driver.get("https://www.walmart.ca/en/stores-near-me")
+    print("do something here")
+    return driver
+
 def selenium_setup_walmart():
     # setup selenium manually by entering postal code
     driver = make_driver()
     driver.get("https://www.walmart.ca/flyer?flyer_type=walmartcanada&store_code=1213&locale=en")
     # driver.get("https://www.walmart.ca/en/stores-near-me")
-
-    # # input postal code into sfa-search__input
-    # # clear sfa-search__input
-    # driver.find_element(By.CLASS_NAME, "sfa-search__input").clear()
-    # time.sleep(1)
-    # driver.find_element(By.CLASS_NAME, "sfa-search__input").send_keys("V5H4M1")
-    # time.sleep(1)
-    # # click on sfa-wm-btn sfa-search__btn search-btn
-    # driver.find_element(By.CLASS_NAME, "sfa-search__btn").click()
-    # time.sleep(3)
-    # # click on first element
-    # driver.find_element(By.CLASS_NAME, "sfa-store-list-item__name").click()
-    # time.sleep(2)
-    # # find link header-flyers
-    # driver.find_element(By.LINK_TEXT, "Flyers").click()
-    # time.sleep(2)
     return driver
 
 def setup_walmart():
@@ -123,6 +116,7 @@ def setup_walmart():
     
     # Refresh the page to apply the cookie changes
     driver.refresh()
+    print("try again")
     return driver
 
 
@@ -137,6 +131,7 @@ def scrap_flyer(driver, cfg: dict):
     Returns:
         None
     """
+    print("Scrapping flyer")
     try:
         main_element = WebDriverWait(driver, 10).until(EC.visibility_of_element_located((By.TAG_NAME, "main")))
     except Exception as e:
@@ -176,6 +171,11 @@ def scrap_flyer(driver, cfg: dict):
     flyer_images = main_flyer.find_elements(By.TAG_NAME, "sfml-flyer-image")
     if flyer_images:
         print("Found flyer")
+        # filter images for "save on" to ensure
+        if cfg.get("type") == StoreType.SAVEON:
+            pass
+            # filter flyer_images out that are missing attribute impressionable
+            # flyer_images = [image for image in flyer_images if image.get_attribute("impressionable") is None]
     else:
         raise Exception("Could not find flyer images")
     data = []
@@ -194,6 +194,8 @@ def scrap_flyer(driver, cfg: dict):
         activeModal.click()
     except Exception as e:
         print("No active modal found")
+
+    parsed_labels = []
     for findex, flyer_image in enumerate(flyer_images):
         # time sleep 5
         # get each button from flyer
@@ -205,8 +207,13 @@ def scrap_flyer(driver, cfg: dict):
         for index, button in enumerate(buttons):
             # click on button
             # print aria-label for button
-            print(f"Parsing for button: {button.get_attribute('aria-label')}")
             label = button.get_attribute("aria-label")
+            if label in parsed_labels:
+                print("Parsed label: " + label)
+                continue
+            else:
+                print(f"Parsing for button: {label}")
+            parsed_labels.append(label)
             data_product_id = button.get_attribute("data-product-id")
             product_name = label.split(",")[0].strip()
             # remove Select for details from label
@@ -221,6 +228,8 @@ def scrap_flyer(driver, cfg: dict):
             else: 
                 # if price is not set, scan for numbers, if only one match, then current_price,
                 # if two matches then savings is available as well, second number
+                # disable double number checking for save on
+                # as grams can happen next, this should be a fallback
                 number_regex = re.findall(r'\$?(\d+(?:\.\d+)?)', label)
                 if number_regex != None:
                     if len(number_regex) == 1:
@@ -242,14 +251,19 @@ def scrap_flyer(driver, cfg: dict):
             # pull label from cfg
             label = label.replace(item_text, "")
             try:
-                button.click()
+                # check if button is in view, if not scroll to button
+                # buttonHeight = button.size["height"] + 150
+                # print(buttonHeight)
+                # if button.location_once_scrolled_into_view == False:
+                #     driver.execute_script(f"window.scrollBy(0, -{buttonHeight});")
+                #     time.sleep(2)
+                #     print("scrolling into view")
+                driver.execute_script("arguments[0].click();", button)
             except Exception as e:
                 print(e)
                 error_file = cfg.get("error_file", "error_walmart.html")
                 with open(error_file, "w", errors="ignore", encoding="utf-8") as f:
                     f.write(driver.page_source)
-                # activeModal = driver.find_element(By.CLASS_NAME, "acsCloseButton.acsAbandonButton")
-                # activeModal.click()
                 exit(1)
             time.sleep(5)
             swap_to_iframe(driver, "flippiframe.productframe")
@@ -263,9 +277,12 @@ def scrap_flyer(driver, cfg: dict):
             # end_date = isoparse(end_date)
             # screenshot
             # get element by tag name p.flipp-description
-            flipp_description = driver.find_element(By.CLASS_NAME, "flipp-description")
-            # get text
-            description = flipp_description.text
+            try:
+                flipp_description = driver.find_element(By.CLASS_NAME, "flipp-description")
+                # get text
+                description = flipp_description.text
+            except NoSuchElementException as e:
+                description = ""
 
             # scrap size and type, parse from description
             # look for mL and g following an number
@@ -287,6 +304,8 @@ def scrap_flyer(driver, cfg: dict):
                 product_type = "pack"
             elif "each" in description.lower():
                 product_type = "each"
+            else:
+                product_type = ""
 
             if "frozen" in description.lower():
                 frozen = True
@@ -299,7 +318,6 @@ def scrap_flyer(driver, cfg: dict):
                 see_more_link = see_more_ele.get_attribute("href")
             except Exception as e:
                 see_more_link = ""
-                print(e)
             driver.save_screenshot(f"data/{data_product_id}.png")
             swap_to_iframe(driver)
             # attempt to match for words, pack. or each.
@@ -358,26 +376,78 @@ def get_walmart():
     }
     scrap_flyer(driver, cfg)
     
+def get_walmart():
+    """
+    Get the information about Walmart.
+    Returns:
+        None
+    """
+
+    driver = selenium_setup_walmart()
+    cfg = {
+        'url': "https://www.saveonfoods.com/sm/pickup/rsid/907/circular",
+        'postal_code': "V5H 4M1",
+        'error_file': "data/error_save_on.html",
+        'cookies_file': "data/save_on_cookies.json",
+        'html_file': "data/walmart.html",
+        'data_file': "data/walmart.json",
+        'item_text': 'Select for details',
+        'rollbar_regex': r'Rollback, (\d+)',
+        'save_regex': r'Save \$([\d*?]+), \$([\d.]+)',
+        'max_items': 50,
+        'type': StoreType("walmart"),
+    }
+    scrap_flyer(driver, cfg)
+
+def get_saveon():
+    """
+    Get the information about Walmart.
+    Returns:
+        None
+    """
+    driver = selenium_setup_saveon()
+    cfg = {
+        'url': "https://www.saveonfoods.com/sm/pickup/rsid/907/circular",
+        'postal_code': "V5H 4M1",
+        'error_file': "data/error_save_on.html",
+        'cookies_file': "data/save_on_cookies.json",
+        'html_file': "data/walmart.html",
+        'data_file': "data/walmart.json",
+        'item_text': 'Select for details',
+        'rollbar_regex': r'Rollback, (\d+)',
+        'save_regex': r'Save \$([\d*?]+), \$([\d.]+)',
+        'max_items': 50,
+        'type': StoreType("saveon"),
+    }
+    scrap_flyer(driver, cfg)
 
 def main(args):
-    if type_value == StoreType.SAVEON:
+    type_value = args.type
+    # convert type_value to enum
+
+    store_value = StoreType(type_value)
+    if store_value == StoreType.SAVEON:
         # Do something for saveon option
-        pass
-    elif type_value == StoreType.WALMART:
+        get_saveon()
+    elif store_value == StoreType.WALMART:
         # Do something for walmart option
         get_walmart()
-    elif type_value == StoreType.SUPERSTORE:
+    elif store_value == StoreType.SUPERSTORE:
         # Do something for superstore option
+        raise Exception("Not implemented yet")
+    else:
         raise Exception("Not implemented yet")
 
 if __name__ == '__main__':
     # argparser with the following arguments type
     parser = argparse.ArgumentParser()
     # argument type with 3 options: saveon, walmart, and superstore
-    parser.add_argument("type", type=str, choices=['saveon', 'walmart', 'superstore'], default="walmart")
-
+    # argparse with enum
+    parser.add_argument("-t", '--type', type=str, choices=['saveon', 'walmart', 'superstore'], default="saveon")
+    # convert type to enum
     # Parse the command-line arguments
     args = parser.parse_args()
 
     # Access the value of the "type" argument
     main(args)
+    # get_walmart()
