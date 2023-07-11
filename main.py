@@ -59,13 +59,106 @@ def swap_to_iframe(driver, iframe_class="flippiframe.mainframe"):
     driver.switch_to.frame(iframe)
 
 
+def parse_flipp_aside(driver, cfg)-> dict:
+    """
+    Parse the flipp aside iframe and extract relevant data.
+    
+    Args:
+        driver (WebDriver): The WebDriver instance to use for parsing the iframe.
+        cfg (dict): A dictionary containing configuration parameters.
+        
+    Returns:
+        dict: A dictionary containing the extracted data from the flipp aside iframe.
+            The dictionary has the following keys:
+            - "start_date" (str): The start date of the flipp aside.
+            - "end_date" (str): The end date of the flipp aside.
+            - "description" (str): The description of the flipp aside.
+            - "size" (str): The size of the flipp aside.
+            - "quantity" (str): The quantity of the flipp aside.
+            - "product_type" (str): The product type of the flipp aside.
+            - "frozen" (bool): True if the flipp aside is frozen, False otherwise.
+            - "see_more_link" (str): The link to see more information about the flipp aside.
+    """
+    swap_to_iframe(driver, "flippiframe.productframe")
+
+    flipp_aside_data = {}
+    # find translation
+    validity_dates = driver.find_element(By.TAG_NAME, "flipp-validity-dates")
+    start_date = validity_dates.get_attribute("start-date")
+    end_date = validity_dates.get_attribute("end-date")
+
+    flipp_aside_data["start_date"] = start_date
+    flipp_aside_data["end_date"] = end_date
+    # Parse the date strings into datetime objects if needed
+    # start_date = isoparse(start_date)
+    # end_date = isoparse(end_date)
+    # screenshot
+    # get element by tag name p.flipp-description
+    try:
+        flipp_description = driver.find_element(By.CLASS_NAME, "flipp-description")
+        # get text
+        description = flipp_description.text
+    except NoSuchElementException as e:
+        description = ""
+
+    flipp_aside_data["description"] = description
+    # scrap size and type, parse from description
+    # look for mL and g following an number
+    size_regex = r"(\d+(?:\.\d+)?)\s*(mL|g)"
+    match = re.search(size_regex, description)
+    if match:
+        size = f"{match.group(0)}" # mL or g
+    else:
+        size = 1
+
+    flipp_aside_data["size"] = size
+
+    quantity_regex = r"(\d+)\s*X\s*(\d+)\s*(mL|g)"
+    match = re.search(quantity_regex, description)
+    if match:
+        quantity = f"{match.group(1)}" # mL or g
+    else: 
+        quantity = 1
+
+    flipp_aside_data["quantity"] = quantity
+    # look for Pack. and Each. in description
+    if "pack" in description.lower():
+        product_type = "pack"
+    elif "each" in description.lower():
+        product_type = "each"
+    else:
+        product_type = ""
+
+    flipp_aside_data["product_type"] = product_type
+
+    if "frozen" in description.lower():
+        frozen = True
+    else:
+        frozen = False
+
+    flipp_aside_data["frozen"] = frozen
+
+    time.sleep(1)
+    # get link by class see-more-link and extract href property
+    try:
+        see_more_ele = driver.find_element(By.CLASS_NAME, "see-more-link")
+        see_more_link = see_more_ele.get_attribute("href")
+    except Exception as e:
+        see_more_link = ""
+    
+    flipp_aside_data["see_more_link"] = see_more_link
+    # driver.save_screenshot(f"data/{data_product_id}.png")
+    swap_to_iframe(driver)
+
+    # return dict with all data variables
+    return flipp_aside_data
+
 
 def selenium_setup_saveon():
     # setup selenium manually by entering postal code
     driver = make_driver()
     driver.get("https://www.saveonfoods.com/sm/pickup/rsid/907/circular")
     # driver.get("https://www.walmart.ca/en/stores-near-me")
-    print("do something here")
     return driver
 
 def selenium_setup_walmart():
@@ -73,6 +166,17 @@ def selenium_setup_walmart():
     driver = make_driver()
     driver.get("https://www.walmart.ca/flyer?flyer_type=walmartcanada&store_code=1213&locale=en")
     # driver.get("https://www.walmart.ca/en/stores-near-me")
+    return driver
+
+
+def setup_superstore():
+    driver = make_driver()
+    driver.get("https://www.realcanadiansuperstore.ca/print-flyer")
+    cookie = {
+        'name': 'last_selected_store',
+        'value': '1518',
+    }
+    driver.refresh()
     return driver
 
 def setup_walmart():
@@ -166,7 +270,7 @@ def scrap_flyer(driver, cfg: dict):
         raise Exception("Could not find main flyer")
     # click on first item in iframe
 
-    time.sleep(1)
+    time.sleep(7)
     # get all tags named sfml-flyer-image from main_flyer and loop through them
     flyer_images = main_flyer.find_elements(By.TAG_NAME, "sfml-flyer-image")
     if flyer_images:
@@ -190,7 +294,10 @@ def scrap_flyer(driver, cfg: dict):
 
     # look for acsCloseButton acsAbandonButton and click it
     try:
-        activeModal = driver.find_element(By.CLASS_NAME, "acsCloseButton")
+        # activeModal = driver.find_element(By.CLASS_NAME, "acsCloseButton")
+        # activeModal.click()
+        # acsDeclineButton
+        activeModal = driver.find_element(By.CLASS_NAME, "acsAbandonButton")
         activeModal.click()
     except Exception as e:
         print("No active modal found")
@@ -198,6 +305,7 @@ def scrap_flyer(driver, cfg: dict):
     parsed_labels = []
     for findex, flyer_image in enumerate(flyer_images):
         # time sleep 5
+
         # get each button from flyer
         driver.execute_script("arguments[0].scrollIntoView();", flyer_image)
         buttons = flyer_image.find_elements(By.TAG_NAME, "button")
@@ -216,6 +324,13 @@ def scrap_flyer(driver, cfg: dict):
             parsed_labels.append(label)
             data_product_id = button.get_attribute("data-product-id")
             product_name = label.split(",")[0].strip()
+
+            # information scrappable on the main flyer without clicking for more details
+            item_main_info = {}
+            item_main_info["label"] = label
+            item_main_info["flyer_path"] = flyer_path
+            item_main_info["product_name"] = product_name
+            item_main_info["data_product_id"] = data_product_id
             # remove Select for details from label
             # scroll so button is centered
             # driver.execute_script("arguments[0].scrollIntoView();", button)
@@ -249,6 +364,8 @@ def scrap_flyer(driver, cfg: dict):
                 if rollback_regex:
                     current_price = float(rollback_regex.group(1))
             # pull label from cfg
+            item_main_info['savings'] = savings,
+            item_main_info['current_price'] = current_price,
             label = label.replace(item_text, "")
             try:
                 # check if button is in view, if not scroll to button
@@ -266,79 +383,20 @@ def scrap_flyer(driver, cfg: dict):
                     f.write(driver.page_source)
                 exit(1)
             time.sleep(5)
-            swap_to_iframe(driver, "flippiframe.productframe")
-            # find translation
-            validity_dates = driver.find_element(By.TAG_NAME, "flipp-validity-dates")
-            start_date = validity_dates.get_attribute("start-date")
-            end_date = validity_dates.get_attribute("end-date")
-
-            # Parse the date strings into datetime objects if needed
-            # start_date = isoparse(start_date)
-            # end_date = isoparse(end_date)
-            # screenshot
-            # get element by tag name p.flipp-description
-            try:
-                flipp_description = driver.find_element(By.CLASS_NAME, "flipp-description")
-                # get text
-                description = flipp_description.text
-            except NoSuchElementException as e:
-                description = ""
-
-            # scrap size and type, parse from description
-            # look for mL and g following an number
-            size_regex = r"(\d+(?:\.\d+)?)\s*(mL|g)"
-            match = re.search(size_regex, description)
-            if match:
-                size = f"{match.group(0)}" # mL or g
+            # handle product details subsection
+            if cfg.get("type") != StoreType.SUPERSTORE:
+                flipp_aside_info = parse_flipp_aside(driver, cfg)
+            # handle superstore
             else:
-                size = 1
-            quantity_regex = r"(\d+)\s*X\s*(\d+)\s*(mL|g)"
-            match = re.search(quantity_regex, description)
-            if match:
-                quantity = f"{match.group(1)}" # mL or g
-            else: 
-                quantity = 1
-
-            # look for Pack. and Each. in description
-            if "pack" in description.lower():
-                product_type = "pack"
-            elif "each" in description.lower():
-                product_type = "each"
-            else:
-                product_type = ""
-
-            if "frozen" in description.lower():
-                frozen = True
-            else:
-                frozen = False
-            time.sleep(1)
-            # get link by class see-more-link and extract href property
-            try:
-                see_more_ele = driver.find_element(By.CLASS_NAME, "see-more-link")
-                see_more_link = see_more_ele.get_attribute("href")
-            except Exception as e:
-                see_more_link = ""
-            driver.save_screenshot(f"data/{data_product_id}.png")
-            swap_to_iframe(driver)
+                flipp_aside_info = {}
+                pass
+            
+            item_main_info.update(flipp_aside_info)
+            # merge data
             # attempt to match for words, pack. or each.
             # frozen, true or false
             
-            data.append({
-                'label': label,
-                'data_product_id': data_product_id,
-                'product_name': product_name,
-                'savings': savings,
-                'current_price': current_price,
-                'start_date': start_date,
-                'end_date': end_date,
-                'description': description,
-                'quantity': quantity,
-                'size': size,
-                'type': product_type,
-                'frozen': frozen,
-                'flyer_url': flyer_path,
-                'url': see_more_link
-            })
+            data.append(item_main_info)
 
             with open(data_file, 'w') as f:
                 json.dump(data, f)
@@ -421,6 +479,29 @@ def get_saveon():
     }
     scrap_flyer(driver, cfg)
 
+
+def get_superstore():
+    """
+    Get the information about Superstore.
+    Returns:
+        None
+    """
+    driver = selenium_setup_saveon()
+    cfg = {
+        'url': "https://www.saveonfoods.com/sm/pickup/rsid/907/circular",
+        'postal_code': "V5H 4M1",
+        'error_file': "data/error_save_on.html",
+        'cookies_file': "data/save_on_cookies.json",
+        'html_file': "data/walmart.html",
+        'data_file': "data/walmart.json",
+        'item_text': 'Select for details',
+        'rollbar_regex': r'Rollback, (\d+)',
+        'save_regex': r'Save \$([\d*?]+), \$([\d.]+)',
+        'max_items': 50,
+        'type': StoreType("superstore"),
+    }
+    scrap_flyer(driver, cfg)
+
 def main(args):
     type_value = args.type
     # convert type_value to enum
@@ -443,7 +524,7 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     # argument type with 3 options: saveon, walmart, and superstore
     # argparse with enum
-    parser.add_argument("-t", '--type', type=str, choices=['saveon', 'walmart', 'superstore'], default="saveon")
+    parser.add_argument("-t", '--type', type=str, choices=['saveon', 'walmart', 'superstore'], default="walmart")
     # convert type to enum
     # Parse the command-line arguments
     args = parser.parse_args()
