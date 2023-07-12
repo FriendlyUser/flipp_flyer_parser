@@ -486,14 +486,14 @@ def get_superstore():
     Returns:
         None
     """
-    driver = selenium_setup_saveon()
+    driver = setup_superstore()
     cfg = {
-        'url': "https://www.saveonfoods.com/sm/pickup/rsid/907/circular",
+        'url': "https://www.realcanadiansuperstore.ca/print-flyer",
         'postal_code': "V5H 4M1",
-        'error_file': "data/error_save_on.html",
-        'cookies_file': "data/save_on_cookies.json",
-        'html_file': "data/walmart.html",
-        'data_file': "data/walmart.json",
+        'error_file': "data/error_superstore.html",
+        'cookies_file': "data/superstore_cookies.json",
+        'html_file': "data/superstore.html",
+        'data_file': "data/superstore.json",
         'item_text': 'Select for details',
         'rollbar_regex': r'Rollback, (\d+)',
         'save_regex': r'Save \$([\d*?]+), \$([\d.]+)',
