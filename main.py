@@ -17,30 +17,6 @@ class StoreType(Enum):
     WALMART = 'walmart'
     SUPERSTORE = 'superstore'
 
-def calc_location_styles_from_button(element):
-    style = element.get_attribute('style')
-    left_match = re.search(r'left:\s*([\d.]+)px', style)
-    top_match = re.search(r'top:\s*([\d.]+)px', style)
-    width_match = re.search(r'width:\s*([\d.]+)px', style)
-    height_match = re.search(r'height:\s*([\d.]+)px', style)
-    # return top, left, right=left+width, bottom=top+height
-    if left_match and top_match and width_match and height_match:
-        left = float(left_match.group(1))
-        top = float(top_match.group(1))
-        width = float(width_match.group(1))
-        height = float(height_match.group(1))
-        # return matches if they all exist
-        return {
-            'left': left,
-            'top': top,
-            'right': left + width,
-            'bottom': top+height,
-            'height': height,
-            'width': width
-        }
-    else: 
-        raise Exception("RAISING ERROR AS this is still not working")
-        return None
 
 def make_driver():
     """
@@ -304,7 +280,6 @@ def scrap_flyer(driver, cfg: dict):
 
     parsed_labels = []
     for findex, flyer_image in enumerate(flyer_images):
-        # time sleep 5
 
         # get each button from flyer
         driver.execute_script("arguments[0].scrollIntoView();", flyer_image)
@@ -363,6 +338,12 @@ def scrap_flyer(driver, cfg: dict):
                 rollback_regex = re.search(rollbar_regex, label)
                 if rollback_regex:
                     current_price = float(rollback_regex.group(1))
+
+                # logic for superstore
+            if current_price == "":
+                number_regex = re.findall(r'\$(\d+(?:\.\d+)?)', label)
+                if number_regex != None:
+                    current_price = number_regex[0]
             # pull label from cfg
             item_main_info['savings'] = savings,
             item_main_info['current_price'] = current_price,
@@ -515,7 +496,7 @@ def main(args):
         get_walmart()
     elif store_value == StoreType.SUPERSTORE:
         # Do something for superstore option
-        raise Exception("Not implemented yet")
+        get_superstore()
     else:
         raise Exception("Not implemented yet")
 
