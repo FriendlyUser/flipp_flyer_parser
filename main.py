@@ -4,6 +4,9 @@ import json
 import re
 import argparse
 import selenium.webdriver.support.expected_conditions as EC
+import mysql.connector
+import os
+from dotenv import load_dotenv
 from dateutil.parser import isoparse
 from selenium.webdriver.common.by import By
 from selenium.webdriver.support.wait import WebDriverWait
@@ -12,6 +15,9 @@ from PIL import Image
 
 # refactor this code later
 from enum import Enum
+
+load_dotenv()
+
 class StoreType(Enum):
     SAVEON = 'saveon'
     WALMART = 'walmart'
@@ -345,8 +351,14 @@ def scrap_flyer(driver, cfg: dict):
                 if number_regex != None:
                     current_price = number_regex[0]
             # pull label from cfg
-            item_main_info['savings'] = savings,
-            item_main_info['current_price'] = current_price,
+            # check if savings is list, if so grab first item
+            if type(savings) == list:
+                savings = savings[0]
+            
+            if type(current_price) == list:
+                current_price = current_price[0]
+            item_main_info['savings'] = savings
+            item_main_info['current_price'] = current_price
             label = label.replace(item_text, "")
             try:
                 # check if button is in view, if not scroll to button
@@ -391,8 +403,10 @@ def scrap_flyer(driver, cfg: dict):
     with open(data_file, 'w') as f:
         json.dump(data, f)
 
-    print("script done")
     driver.switch_to.default_content()
+
+    return cfg
+
 def get_walmart():
     """
     Get the information about Walmart.
@@ -411,9 +425,10 @@ def get_walmart():
         'item_text': 'Select for details',
         'rollbar_regex': r'Rollback, (\d+)',
         'save_regex': r'Save \$([\d*?]+), \$([\d.]+)',
-        'max_items': 50,
+        'max_items': 5,
     }
     scrap_flyer(driver, cfg)
+    return cfg
     
 def get_walmart():
     """
@@ -437,6 +452,7 @@ def get_walmart():
         'type': StoreType("walmart"),
     }
     scrap_flyer(driver, cfg)
+    return cfg
 
 def get_saveon():
     """
@@ -460,6 +476,8 @@ def get_saveon():
     }
     scrap_flyer(driver, cfg)
 
+    return cfg 
+
 
 def get_superstore():
     """
@@ -482,6 +500,79 @@ def get_superstore():
         'type': StoreType("superstore"),
     }
     scrap_flyer(driver, cfg)
+    return cfg
+
+
+def add_to_db(data):
+
+    db_user = os.getenv('DB_USER')
+    db_password = os.getenv('DB_PASSWORD')
+    db_host = os.getenv('DB_HOST')
+    db_name = os.getenv('DB_NAME')
+    # Database connection parameters
+    db_config = {
+        'user': db_user,
+        'password': db_password,
+        'host': db_host,
+        'database': db_name,
+        'raise_on_warnings': True
+    }
+
+    try:
+        # Connect to the database
+        cnx = mysql.connector.connect(**db_config)
+
+        # Prepare a cursor object using cursor() method
+        cursor = cnx.cursor()
+
+        # SQL insert statement
+        add_grocery = ("INSERT INTO grocery "
+                    "(label, flyer_path, product_name, data_product_id, savings, current_price, start_date, end_date, description, size, quantity, product_type, frozen, see_more_link) "
+                    "VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)")
+
+        for json_data in data:
+            # Data to be inserted
+            start_date = json_data['start_date']
+            # modify start_date to YYYY-MM-DD
+            start_date = start_date[:10]
+            end_date = json_data['end_date']
+            # modify end_date to YYYY-MM-DD
+            # make sure size is either a valid number or null
+            end_date = end_date[:10]
+            data_grocery = (
+                json_data['label'],
+                json_data['flyer_path'],
+                json_data['product_name'],
+                json_data['data_product_id'],
+                json_data['savings'],
+                json_data['current_price'],
+                start_date,
+                end_date,
+                json_data['description'],
+                json_data['size'],
+                json_data['quantity'],
+                json_data['product_type'],
+                json_data['frozen'],
+                json_data['see_more_link']
+            )
+
+            # Execute the SQL command
+            cursor.execute(add_grocery, data_grocery)
+
+            # Commit the changes in the database
+            cnx.commit()
+
+    except mysql.connector.Error as err:
+        print(f"Error: {err}")
+
+    finally:
+        if cnx.is_connected():
+            # Close the cursor and connection
+            cursor.close()
+            cnx.close()
+            print("MySQL connection is closed")
+
+
 
 def main(args):
     type_value = args.type
@@ -490,22 +581,35 @@ def main(args):
     store_value = StoreType(type_value)
     if store_value == StoreType.SAVEON:
         # Do something for saveon option
-        get_saveon()
+        cfg = get_saveon()
     elif store_value == StoreType.WALMART:
         # Do something for walmart option
-        get_walmart()
+        cfg = get_walmart()
     elif store_value == StoreType.SUPERSTORE:
         # Do something for superstore option
-        get_superstore()
+        cfg = get_superstore()
+        
     else:
         raise Exception("Not implemented yet")
+
+    # grab data file from cfg
+    data_file = cfg.get("data_file")
+    if os.path.exists(data_file):
+        # read data file and sync with db, add current date as argument.
+        # read data from data_file into dictionary
+        with open(data_file, 'r') as f:
+            json_data = json.load(f)
+        # save data to db
+        add_to_db(json_data)
+    else:
+        pass
 
 if __name__ == '__main__':
     # argparser with the following arguments type
     parser = argparse.ArgumentParser()
     # argument type with 3 options: saveon, walmart, and superstore
     # argparse with enum
-    parser.add_argument("-t", '--type', type=str, choices=['saveon', 'walmart', 'superstore'], default="walmart")
+    parser.add_argument("-t", '--type', type=str, choices=['saveon', 'walmart', 'superstore', 'db_save'], default="walmart")
     # convert type to enum
     # Parse the command-line arguments
     args = parser.parse_args()
