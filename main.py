@@ -24,6 +24,7 @@ class StoreType(Enum):
     SAVEON = 'saveon'
     WALMART = 'walmart'
     SUPERSTORE = 'superstore'
+    LOBLAWS = 'loblaws'
 
 
 def make_driver():
@@ -163,16 +164,24 @@ def selenium_setup_walmart():
     # driver.get("https://www.walmart.ca/en/stores-near-me")
     return driver
 
+def selenium_setup_loblaws():
+    # setup selenium manually by entering postal code
+    driver = make_driver()
+    driver.get("https://www.loblaws.ca/en/store-locator/details/7491")
+    time.sleep(7)
+    # grab link location-details-contact__flyer__link
+    # and click
+    location_link = driver.find_element(By.CLASS_NAME, "location-details-contact__flyer__link")
+    location_link.click()
+    time.sleep(2)
+
+    # driver.get("https://www.walmart.ca/en/stores-near-me")
+    return driver
+
 
 def setup_superstore():
     driver = make_driver()
     driver.get("https://www.realcanadiansuperstore.ca/print-flyer")
-    # cookie = {
-    #     'name': 'last_selected_store',
-    #     'value': '1518',
-    #     'domain': 'www.realcanadiansuperstore.ca',  # Ensure this matches the domain of the current page
-    #     'path': '/'
-    # }
 
     cookie_more = {
         'name': 'flipp-store-code_2271',
@@ -180,6 +189,21 @@ def setup_superstore():
         'domain': 'www.realcanadiansuperstore.ca',  # Ensure this matches the domain of the current page
         'path': '/'
     }
+    driver.add_cookie(cookie_more)
+    driver.refresh()
+    return driver
+
+
+def setup_loblaws():
+    driver = make_driver()
+    driver.get("https://www.realcanadiansuperstore.ca/print-flyer")
+    cookie = {
+        'name': 'last_selected_store',
+        'value': '7491',
+        'domain': 'www.loblaws.ca',  # Ensure this matches the domain of the current page
+        'path': '/'
+    }
+
     driver.add_cookie(cookie_more)
     driver.refresh()
     return driver
@@ -375,7 +399,8 @@ def scrap_flyer(driver, cfg: dict):
             if current_price == "":
                 number_regex = re.findall(r'\$(\d+(?:\.\d+)?)', label)
                 if number_regex != None:
-                    current_price = number_regex[0]
+                    if len(number_regex) >= 1:
+                        current_price = number_regex[0]
             # pull label from cfg
             # check if savings is list, if so grab first item
             if type(savings) == list:
@@ -414,7 +439,7 @@ def scrap_flyer(driver, cfg: dict):
             # merge data
             # attempt to match for words, pack. or each.
             # frozen, true or false
-            
+            print("flipp_aside_info: ", item_main_info)
             data.append(item_main_info)
 
             with open(data_file, 'w') as f:
@@ -482,7 +507,7 @@ def get_walmart():
 
 def get_saveon():
     """
-    Get the information about Walmart.
+    Get the information about Save on.
     Returns:
         None
     """
@@ -499,6 +524,30 @@ def get_saveon():
         'save_regex': r'Save \$([\d*?]+), \$([\d.]+)',
         'max_items': 50,
         'type': StoreType("saveon"),
+    }
+    scrap_flyer(driver, cfg)
+
+    return cfg 
+
+def get_loblaws():
+    """
+    Get the information about Save on.
+    Returns:
+        None
+    """
+    driver = selenium_setup_loblaws()
+    cfg = {
+        'url': "https://www.loblaws.ca/en/store-locator/details/7491",
+        'postal_code': "V5H 4M1",
+        'error_file': "data/error_save_on.html",
+        'cookies_file': "data/loblaws.json",
+        'html_file': "data/loblaws.html",
+        'data_file': "data/loblaws.json",
+        'item_text': 'Select for details',
+        'rollbar_regex': r'Rollback, (\d+)',
+        'save_regex': r'Save \$([\d*?]+), \$([\d.]+)',
+        'max_items': 75,
+        'type': StoreType("loblaws"),
     }
     scrap_flyer(driver, cfg)
 
@@ -576,10 +625,37 @@ def add_to_db(data):
             start_date = json_data.get('start_date')
             if start_date:
                 start_date = start_date[:10]
+            else:
+                # No start_date provided:
+                # 1) Find today's date
+                today = datetime.date.today()
+                
+                # 2) Calculate how many days until the next (or current) Thursday
+                #    weekday(): Monday=0, Tuesday=1, Wednesday=2, Thursday=3, ...
+                #    So, if it's already Thursday, days_until_thursday becomes 0
+                #    Otherwise, it calculates how many days until the next Thursday
+                days_until_thursday = (3 - today.weekday()) % 7
+                
+                # 3) Closest Thursday from today
+                closest_thursday = today + datetime.timedelta(days=days_until_thursday)
+                
+                # 4) Format it as YYYY-MM-DD
+                start_date = closest_thursday.strftime('%Y-%m-%d')
             
             end_date = json_data.get('end_date')
             if end_date:
                 end_date = end_date[:10]
+
+            else:
+                # No end_date provided:
+                # 1) Convert our new start_date string back to a date object
+                start_dt = datetime.datetime.strptime(start_date, '%Y-%m-%d').date()
+                
+                # 2) Add 7 days
+                end_dt = start_dt + datetime.timedelta(days=7)
+                
+                # 3) Format as YYYY-MM-DD
+                end_date = end_dt.strftime('%Y-%m-%d')
 
             data_grocery = (
                 json_data['label'],
@@ -701,6 +777,10 @@ def main(args):
     elif store_value == StoreType.SUPERSTORE:
         # Do something for superstore option
         cfg = get_superstore()
+
+    elif store_value == StoreType.LOBLAWS:
+        # Do something for superstore option
+        cfg = get_loblaws()
         
     else:
         raise Exception("Not implemented yet")

@@ -4,12 +4,11 @@ My original plan with this script was to get lots of grocery data to analyze and
 
 https://friendlyuser.github.io/posts/flipp_grocery_scrapper
 
-Ideally you would feed this data into a gpt or equivalent to get items of interest.
 
-For example
+## How to Use
 
-https://chat.openai.com/share/c1288cbf-8890-4833-a87c-8601cb065d5a
-
+In order to use these scripts, you may need advanced web knowledge for loblaws and superstore, I recommend installing an extension that can read
+cookies for the last_store_visited and flipp-store-code_2271
 
 ## Making a database
 
