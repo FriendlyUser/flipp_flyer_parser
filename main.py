@@ -477,31 +477,9 @@ def get_walmart():
         'rollbar_regex': r'Rollback, (\d+)',
         'save_regex': r'Save \$([\d*?]+), \$([\d.]+)',
         'max_items': 50,
-    }
-    scrap_flyer(driver, cfg)
-    return cfg
-    
-def get_walmart():
-    """
-    Get the information about Walmart.
-    Returns:
-        None
-    """
-
-    driver = selenium_setup_walmart()
-    cfg = {
-        'url': "https://www.saveonfoods.com/sm/pickup/rsid/907/circular",
-        'postal_code': "V5H 4M1",
-        'error_file': "data/error_save_on.html",
-        'cookies_file': "data/save_on_cookies.json",
-        'html_file': "data/walmart.html",
-        'data_file': "data/walmart.json",
-        'item_text': 'Select for details',
-        'rollbar_regex': r'Rollback, (\d+)',
-        'save_regex': r'Save \$([\d*?]+), \$([\d.]+)',
-        'max_items': 50,
         'type': StoreType("walmart"),
     }
+    time.sleep(2)
     scrap_flyer(driver, cfg)
     return cfg
 
@@ -578,7 +556,7 @@ def get_superstore():
     return cfg
 
 
-def add_to_db(data):
+def add_to_db(data, params):
 
     # db_user = os.getenv('DB_USER')
     # db_password = os.getenv('DB_PASSWORD')
@@ -587,7 +565,12 @@ def add_to_db(data):
     # # Optional: DB_PORT, if not using the default 5432
     # db_port = os.getenv('DB_PORT', 5432)
     connection_url = os.getenv("DATABASE_URL")
-
+    store_type = params.get('type')
+    # if enum type convert to string
+    if isinstance(store_type, StoreType):
+        store_type = store_type.value
+    else:
+        store_type = str(store_type)
     try:
         # Connect to PostgreSQL
         conn = psycopg2.connect(
@@ -613,9 +596,10 @@ def add_to_db(data):
                 quantity,
                 product_type,
                 frozen,
-                see_more_link
+                see_more_link,
+                store
             )
-            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
         """
 
         print("json_data: ", data)
@@ -671,7 +655,8 @@ def add_to_db(data):
                 json_data.get('quantity'),
                 json_data.get('product_type'),
                 json_data.get('frozen'),
-                json_data.get('see_more_link')
+                json_data.get('see_more_link'),
+                store_type
             )
             print("Data: ", data_grocery)
 
@@ -794,7 +779,7 @@ def main(args):
             json_data = json.load(f)
         # save data to db
         print("what is json data: ", json_data)
-        add_to_db(json_data)
+        add_to_db(json_data, cfg)
     else:
         pass
 

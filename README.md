@@ -29,7 +29,9 @@ CREATE TABLE grocery (
                       quantity varchar(255),
                         product_type varchar(100),
                           frozen boolean,
-                            see_more_link varchar(255)
+                            see_more_link varchar(255),
+                            store             VARCHAR(255),
+                            store_location    VARCHAR(255)
                             );)
 ```
 
