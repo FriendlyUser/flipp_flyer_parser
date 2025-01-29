@@ -15,6 +15,8 @@ from PIL import Image
 
 # refactor this code later
 from enum import Enum
+import psycopg2
+from psycopg2 import sql, errors
 
 load_dotenv()
 
@@ -31,6 +33,8 @@ def make_driver():
     Return the configured WebDriver instance.
     """
     driver = uc.Chrome(headless=False,use_subprocess=False)
+
+    driver.maximize_window()
     return driver
 
 def swap_to_iframe(driver, iframe_class="flippiframe.mainframe"):
@@ -38,6 +42,8 @@ def swap_to_iframe(driver, iframe_class="flippiframe.mainframe"):
     # Switch to the iframe
     iframe = driver.find_element(By.CLASS_NAME, iframe_class)
     # then find frame and swap
+    if not iframe:
+        raise Exception("iframe not found, likely changes in the flipp template")
     driver.switch_to.frame(iframe)
 
 
@@ -61,16 +67,23 @@ def parse_flipp_aside(driver, cfg)-> dict:
             - "frozen" (bool): True if the flipp aside is frozen, False otherwise.
             - "see_more_link" (str): The link to see more information about the flipp aside.
     """
-    swap_to_iframe(driver, "flippiframe.productframe")
+    # before this was flippiframe.productframe flippiframe asideframe
+    try:
+        swap_to_iframe(driver, "flippiframe.asideframe")
+    except Exception as e:
+        print("failed to search with flippiframe.asideframe")
+        swap_to_iframe(driver, "flippiframe.navframe")
 
     flipp_aside_data = {}
     # find translation
     validity_dates = driver.find_element(By.TAG_NAME, "flipp-validity-dates")
+
     start_date = validity_dates.get_attribute("start-date")
     end_date = validity_dates.get_attribute("end-date")
 
     flipp_aside_data["start_date"] = start_date
     flipp_aside_data["end_date"] = end_date
+
     # Parse the date strings into datetime objects if needed
     # start_date = isoparse(start_date)
     # end_date = isoparse(end_date)
@@ -154,10 +167,20 @@ def selenium_setup_walmart():
 def setup_superstore():
     driver = make_driver()
     driver.get("https://www.realcanadiansuperstore.ca/print-flyer")
-    cookie = {
-        'name': 'last_selected_store',
+    # cookie = {
+    #     'name': 'last_selected_store',
+    #     'value': '1518',
+    #     'domain': 'www.realcanadiansuperstore.ca',  # Ensure this matches the domain of the current page
+    #     'path': '/'
+    # }
+
+    cookie_more = {
+        'name': 'flipp-store-code_2271',
         'value': '1518',
+        'domain': 'www.realcanadiansuperstore.ca',  # Ensure this matches the domain of the current page
+        'path': '/'
     }
+    driver.add_cookie(cookie_more)
     driver.refresh()
     return driver
 
@@ -233,6 +256,9 @@ def scrap_flyer(driver, cfg: dict):
     cookies = driver.get_cookies()
     # save cookies are cookies.json
     cookies_file = cfg.get("cookies_file", "data/cookies.json")
+    # check if data directory exists, if not create it
+    if not os.path.exists("data"):
+        os.makedirs("data")
     with open(cookies_file, "w") as f:
         json.dump(cookies, f)
     
@@ -425,7 +451,7 @@ def get_walmart():
         'item_text': 'Select for details',
         'rollbar_regex': r'Rollback, (\d+)',
         'save_regex': r'Save \$([\d*?]+), \$([\d.]+)',
-        'max_items': 5,
+        'max_items': 50,
     }
     scrap_flyer(driver, cfg)
     return cfg
@@ -496,7 +522,7 @@ def get_superstore():
         'item_text': 'Select for details',
         'rollbar_regex': r'Rollback, (\d+)',
         'save_regex': r'Save \$([\d*?]+), \$([\d.]+)',
-        'max_items': 50,
+        'max_items': 5,
         'type': StoreType("superstore"),
     }
     scrap_flyer(driver, cfg)
@@ -504,6 +530,93 @@ def get_superstore():
 
 
 def add_to_db(data):
+
+    # db_user = os.getenv('DB_USER')
+    # db_password = os.getenv('DB_PASSWORD')
+    # db_host = os.getenv('DB_HOST')
+    # db_name = os.getenv('DB_NAME')
+    # # Optional: DB_PORT, if not using the default 5432
+    # db_port = os.getenv('DB_PORT', 5432)
+    connection_url = os.getenv("DATABASE_URL")
+
+    try:
+        # Connect to PostgreSQL
+        conn = psycopg2.connect(
+            connection_url
+        )
+
+        # Create a new database session and return a cursor
+        cursor = conn.cursor()
+
+        # SQL insert statement
+        insert_grocery = """
+            INSERT INTO grocery (
+                label,
+                flyer_path,
+                product_name,
+                data_product_id,
+                savings,
+                current_price,
+                start_date,
+                end_date,
+                description,
+                size,
+                quantity,
+                product_type,
+                frozen,
+                see_more_link
+            )
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+        """
+
+        print("json_data: ", data)
+
+        for json_data in data:
+            # Extract and manipulate fields as needed
+            start_date = json_data.get('start_date')
+            if start_date:
+                start_date = start_date[:10]
+            
+            end_date = json_data.get('end_date')
+            if end_date:
+                end_date = end_date[:10]
+
+            data_grocery = (
+                json_data['label'],
+                json_data['flyer_path'],
+                json_data['product_name'],
+                json_data['data_product_id'],
+                json_data['savings'],
+                json_data['current_price'],
+                start_date,
+                end_date,
+                json_data.get('description', ''),
+                json_data.get('size'),
+                json_data.get('quantity'),
+                json_data.get('product_type'),
+                json_data.get('frozen'),
+                json_data.get('see_more_link')
+            )
+            print("Data: ", data_grocery)
+
+            # Execute and commit
+            cursor.execute(insert_grocery, data_grocery)
+        
+        conn.commit()
+
+    except psycopg2.Error as err:
+        print(f"Error: {err}")
+        if conn:
+            conn.rollback()  # rollback if something goes wrong
+
+    finally:
+        # Close the connection properly
+        if conn:
+            cursor.close()
+            conn.close()
+            print("PostgreSQL connection is closed")
+
+def add_to_db_sql(data):
 
     db_user = os.getenv('DB_USER')
     db_password = os.getenv('DB_PASSWORD')
@@ -600,6 +713,7 @@ def main(args):
         with open(data_file, 'r') as f:
             json_data = json.load(f)
         # save data to db
+        print("what is json data: ", json_data)
         add_to_db(json_data)
     else:
         pass
@@ -609,7 +723,7 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     # argument type with 3 options: saveon, walmart, and superstore
     # argparse with enum
-    parser.add_argument("-t", '--type', type=str, choices=['saveon', 'walmart', 'superstore', 'db_save'], default="walmart")
+    parser.add_argument("-t", '--type', type=str, choices=['saveon', 'walmart', 'superstore', 'loblaws'], default="walmart")
     # convert type to enum
     # Parse the command-line arguments
     args = parser.parse_args()

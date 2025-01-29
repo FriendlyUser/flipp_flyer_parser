@@ -4,3 +4,4 @@ find_grocery_script.js
 data
 data_legacy
 .env
+*.sql
