@@ -6,6 +6,7 @@ import argparse
 import selenium.webdriver.support.expected_conditions as EC
 import mysql.connector
 import os
+import datetime
 from dotenv import load_dotenv
 from dateutil.parser import isoparse
 from selenium.webdriver.common.by import By
@@ -15,6 +16,8 @@ from PIL import Image
 
 # refactor this code later
 from enum import Enum
+import psycopg2
+from psycopg2 import sql, errors
 
 load_dotenv()
 
@@ -22,6 +25,7 @@ class StoreType(Enum):
     SAVEON = 'saveon'
     WALMART = 'walmart'
     SUPERSTORE = 'superstore'
+    LOBLAWS = 'loblaws'
 
 
 def make_driver():
@@ -31,6 +35,8 @@ def make_driver():
     Return the configured WebDriver instance.
     """
     driver = uc.Chrome(headless=False,use_subprocess=False)
+
+    driver.maximize_window()
     return driver
 
 def swap_to_iframe(driver, iframe_class="flippiframe.mainframe"):
@@ -38,6 +44,8 @@ def swap_to_iframe(driver, iframe_class="flippiframe.mainframe"):
     # Switch to the iframe
     iframe = driver.find_element(By.CLASS_NAME, iframe_class)
     # then find frame and swap
+    if not iframe:
+        raise Exception("iframe not found, likely changes in the flipp template")
     driver.switch_to.frame(iframe)
 
 
@@ -61,16 +69,23 @@ def parse_flipp_aside(driver, cfg)-> dict:
             - "frozen" (bool): True if the flipp aside is frozen, False otherwise.
             - "see_more_link" (str): The link to see more information about the flipp aside.
     """
-    swap_to_iframe(driver, "flippiframe.productframe")
+    # before this was flippiframe.productframe flippiframe asideframe
+    try:
+        swap_to_iframe(driver, "flippiframe.asideframe")
+    except Exception as e:
+        print("failed to search with flippiframe.asideframe")
+        swap_to_iframe(driver, "flippiframe.navframe")
 
     flipp_aside_data = {}
     # find translation
     validity_dates = driver.find_element(By.TAG_NAME, "flipp-validity-dates")
+
     start_date = validity_dates.get_attribute("start-date")
     end_date = validity_dates.get_attribute("end-date")
 
     flipp_aside_data["start_date"] = start_date
     flipp_aside_data["end_date"] = end_date
+
     # Parse the date strings into datetime objects if needed
     # start_date = isoparse(start_date)
     # end_date = isoparse(end_date)
@@ -150,14 +165,51 @@ def selenium_setup_walmart():
     # driver.get("https://www.walmart.ca/en/stores-near-me")
     return driver
 
+def selenium_setup_loblaws():
+    # setup selenium manually by entering postal code
+    driver = make_driver()
+    driver.get("https://www.loblaws.ca/en/store-locator/details/7491")
+    time.sleep(7)
+    # grab link location-details-contact__flyer__link
+    # and click
+    location_link = driver.find_element(By.CLASS_NAME, "location-details-contact__flyer__link")
+    location_link.click()
+    time.sleep(2)
+
+    # driver.get("https://www.walmart.ca/en/stores-near-me")
+    return driver
+
 
 def setup_superstore():
+    driver = make_driver()
+    driver.get('https://www.realcanadiansuperstore.ca/en/store-locator/details/1518?icta=pickup-details-modal')
+    time.sleep(7)
+    cookie_more = {
+        'name': 'flipp-store-code_2271',
+        'value': '1518',
+        'domain': 'www.realcanadiansuperstore.ca',  # Ensure this matches the domain of the current page
+        'path': '/'
+    }
+    driver.add_cookie(cookie_more)
+    # driver.refresh()
+    time.sleep(3)
+    location_link = driver.find_element(By.CLASS_NAME, "location-details-contact__flyer__link")
+    location_link.click()
+    time.sleep(2)
+    return driver
+
+
+def setup_loblaws():
     driver = make_driver()
     driver.get("https://www.realcanadiansuperstore.ca/print-flyer")
     cookie = {
         'name': 'last_selected_store',
-        'value': '1518',
+        'value': '7491',
+        'domain': 'www.loblaws.ca',  # Ensure this matches the domain of the current page
+        'path': '/'
     }
+
+    driver.add_cookie(cookie_more)
     driver.refresh()
     return driver
 
@@ -233,6 +285,9 @@ def scrap_flyer(driver, cfg: dict):
     cookies = driver.get_cookies()
     # save cookies are cookies.json
     cookies_file = cfg.get("cookies_file", "data/cookies.json")
+    # check if data directory exists, if not create it
+    if not os.path.exists("data"):
+        os.makedirs("data")
     with open(cookies_file, "w") as f:
         json.dump(cookies, f)
     
@@ -349,7 +404,8 @@ def scrap_flyer(driver, cfg: dict):
             if current_price == "":
                 number_regex = re.findall(r'\$(\d+(?:\.\d+)?)', label)
                 if number_regex != None:
-                    current_price = number_regex[0]
+                    if len(number_regex) >= 1:
+                        current_price = number_regex[0]
             # pull label from cfg
             # check if savings is list, if so grab first item
             if type(savings) == list:
@@ -388,7 +444,7 @@ def scrap_flyer(driver, cfg: dict):
             # merge data
             # attempt to match for words, pack. or each.
             # frozen, true or false
-            
+            print("flipp_aside_info: ", item_main_info)
             data.append(item_main_info)
 
             with open(data_file, 'w') as f:
@@ -425,38 +481,16 @@ def get_walmart():
         'item_text': 'Select for details',
         'rollbar_regex': r'Rollback, (\d+)',
         'save_regex': r'Save \$([\d*?]+), \$([\d.]+)',
-        'max_items': 5,
-    }
-    scrap_flyer(driver, cfg)
-    return cfg
-    
-def get_walmart():
-    """
-    Get the information about Walmart.
-    Returns:
-        None
-    """
-
-    driver = selenium_setup_walmart()
-    cfg = {
-        'url': "https://www.saveonfoods.com/sm/pickup/rsid/907/circular",
-        'postal_code': "V5H 4M1",
-        'error_file': "data/error_save_on.html",
-        'cookies_file': "data/save_on_cookies.json",
-        'html_file': "data/walmart.html",
-        'data_file': "data/walmart.json",
-        'item_text': 'Select for details',
-        'rollbar_regex': r'Rollback, (\d+)',
-        'save_regex': r'Save \$([\d*?]+), \$([\d.]+)',
         'max_items': 50,
         'type': StoreType("walmart"),
     }
+    time.sleep(2)
     scrap_flyer(driver, cfg)
     return cfg
 
 def get_saveon():
     """
-    Get the information about Walmart.
+    Get the information about Save on.
     Returns:
         None
     """
@@ -473,6 +507,30 @@ def get_saveon():
         'save_regex': r'Save \$([\d*?]+), \$([\d.]+)',
         'max_items': 50,
         'type': StoreType("saveon"),
+    }
+    scrap_flyer(driver, cfg)
+
+    return cfg 
+
+def get_loblaws():
+    """
+    Get the information about Save on.
+    Returns:
+        None
+    """
+    driver = selenium_setup_loblaws()
+    cfg = {
+        'url': "https://www.loblaws.ca/en/store-locator/details/7491",
+        'postal_code': "V5H 4M1",
+        'error_file': "data/error_save_on.html",
+        'cookies_file': "data/loblaws.json",
+        'html_file': "data/loblaws.html",
+        'data_file': "data/loblaws.json",
+        'item_text': 'Select for details',
+        'rollbar_regex': r'Rollback, (\d+)',
+        'save_regex': r'Save \$([\d*?]+), \$([\d.]+)',
+        'max_items': 75,
+        'type': StoreType("loblaws"),
     }
     scrap_flyer(driver, cfg)
 
@@ -496,14 +554,135 @@ def get_superstore():
         'item_text': 'Select for details',
         'rollbar_regex': r'Rollback, (\d+)',
         'save_regex': r'Save \$([\d*?]+), \$([\d.]+)',
-        'max_items': 50,
+        'max_items': 5,
         'type': StoreType("superstore"),
     }
     scrap_flyer(driver, cfg)
     return cfg
 
 
-def add_to_db(data):
+def add_to_db(data, params):
+
+    # db_user = os.getenv('DB_USER')
+    # db_password = os.getenv('DB_PASSWORD')
+    # db_host = os.getenv('DB_HOST')
+    # db_name = os.getenv('DB_NAME')
+    # # Optional: DB_PORT, if not using the default 5432
+    # db_port = os.getenv('DB_PORT', 5432)
+    connection_url = os.getenv("DATABASE_URL")
+    store_type = params.get('type')
+    # if enum type convert to string
+    if isinstance(store_type, StoreType):
+        store_type = store_type.value
+    else:
+        store_type = str(store_type)
+    try:
+        # Connect to PostgreSQL
+        conn = psycopg2.connect(
+            connection_url
+        )
+
+        # Create a new database session and return a cursor
+        cursor = conn.cursor()
+
+        # SQL insert statement
+        insert_grocery = """
+            INSERT INTO grocery (
+                label,
+                flyer_path,
+                product_name,
+                data_product_id,
+                savings,
+                current_price,
+                start_date,
+                end_date,
+                description,
+                size,
+                quantity,
+                product_type,
+                frozen,
+                see_more_link,
+                store
+            )
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+        """
+
+        print("json_data: ", data)
+
+        for json_data in data:
+            # Extract and manipulate fields as needed
+            start_date = json_data.get('start_date')
+            if start_date:
+                start_date = start_date[:10]
+            else:
+                # No start_date provided:
+                # 1) Find today's date
+                today = datetime.date.today()
+                
+                # 2) Calculate how many days until the next (or current) Thursday
+                #    weekday(): Monday=0, Tuesday=1, Wednesday=2, Thursday=3, ...
+                #    So, if it's already Thursday, days_until_thursday becomes 0
+                #    Otherwise, it calculates how many days until the next Thursday
+                days_until_thursday = (3 - today.weekday()) % 7
+                
+                # 3) Closest Thursday from today
+                closest_thursday = today + datetime.timedelta(days=days_until_thursday)
+                
+                # 4) Format it as YYYY-MM-DD
+                start_date = closest_thursday.strftime('%Y-%m-%d')
+            
+            end_date = json_data.get('end_date')
+            if end_date:
+                end_date = end_date[:10]
+
+            else:
+                # No end_date provided:
+                # 1) Convert our new start_date string back to a date object
+                start_dt = datetime.datetime.strptime(start_date, '%Y-%m-%d').date()
+                
+                # 2) Add 7 days
+                end_dt = start_dt + datetime.timedelta(days=7)
+                
+                # 3) Format as YYYY-MM-DD
+                end_date = end_dt.strftime('%Y-%m-%d')
+
+            data_grocery = (
+                json_data['label'],
+                json_data['flyer_path'],
+                json_data['product_name'],
+                json_data['data_product_id'],
+                json_data['savings'],
+                json_data.get('current_price', 0),
+                start_date,
+                end_date,
+                json_data.get('description', ''),
+                json_data.get('size'),
+                json_data.get('quantity'),
+                json_data.get('product_type'),
+                json_data.get('frozen'),
+                json_data.get('see_more_link'),
+                store_type
+            )
+            print("Data: ", data_grocery)
+
+            # Execute and commit
+            cursor.execute(insert_grocery, data_grocery)
+        
+        conn.commit()
+
+    except psycopg2.Error as err:
+        print(f"Error: {err}")
+        if conn:
+            conn.rollback()  # rollback if something goes wrong
+
+    finally:
+        # Close the connection properly
+        if conn:
+            cursor.close()
+            conn.close()
+            print("PostgreSQL connection is closed")
+
+def add_to_db_sql(data):
 
     db_user = os.getenv('DB_USER')
     db_password = os.getenv('DB_PASSWORD')
@@ -588,6 +767,10 @@ def main(args):
     elif store_value == StoreType.SUPERSTORE:
         # Do something for superstore option
         cfg = get_superstore()
+
+    elif store_value == StoreType.LOBLAWS:
+        # Do something for superstore option
+        cfg = get_loblaws()
         
     else:
         raise Exception("Not implemented yet")
@@ -600,7 +783,8 @@ def main(args):
         with open(data_file, 'r') as f:
             json_data = json.load(f)
         # save data to db
-        add_to_db(json_data)
+        print("what is json data: ", json_data)
+        add_to_db(json_data, cfg)
     else:
         pass
 
@@ -609,7 +793,7 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     # argument type with 3 options: saveon, walmart, and superstore
     # argparse with enum
-    parser.add_argument("-t", '--type', type=str, choices=['saveon', 'walmart', 'superstore', 'db_save'], default="walmart")
+    parser.add_argument("-t", '--type', type=str, choices=['saveon', 'walmart', 'superstore', 'loblaws'], default="walmart")
     # convert type to enum
     # Parse the command-line arguments
     args = parser.parse_args()
