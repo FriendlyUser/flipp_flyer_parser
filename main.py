@@ -161,20 +161,54 @@ def selenium_setup_saveon():
 def selenium_setup_walmart():
     # setup selenium manually by entering postal code
     driver = make_driver()
-    driver.get("https://www.walmart.ca/flyer?flyer_type=walmartcanada&store_code=1213&locale=en")
-    # driver.get("https://www.walmart.ca/en/stores-near-me")
+    driver.get('https://www.walmart.ca/en/stores-near-me/burnaby-sw-1213')
+
+     try:
+        # Wait for the "Set as My Store" button to be clickable
+        set_as_my_store_button = WebDriverWait(driver, 10).until(
+            EC.element_to_be_clickable((By.XPATH, "//button[text()='Set as My Store']"))
+        )
+        set_as_my_store_button.click()
+
+        # Wait for a bit after setting the store
+        time.sleep(3)
+
+        # Wait for the "View Flyers" button to be clickable and then click
+        view_flyers_button = WebDriverWait(driver, 10).until(
+            EC.element_to_be_clickable((By.XPATH, "//a[text()='View Flyers']"))
+        )
+        view_flyers_button.click()
+
+
+        WebDriverWait(driver, 10).until(
+            EC.url_contains("flyer?flyer_type=walmartcanada&store_code=1213&locale=en")
+        )
+
+
+    except Exception as e:
+        print(f"An error occurred: {e}")
+        driver.get("https://www.walmart.ca/flyer?flyer_type=walmartcanada&store_code=1213&locale=en")
+
     return driver
 
 def selenium_setup_loblaws():
     # setup selenium manually by entering postal code
     driver = make_driver()
     driver.get("https://www.loblaws.ca/en/store-locator/details/7491")
-    time.sleep(7)
-    # grab link location-details-contact__flyer__link
-    # and click
-    location_link = driver.find_element(By.CLASS_NAME, "location-details-contact__flyer__link")
-    location_link.click()
-    time.sleep(2)
+     try:
+        # Wait for the flyer link to be clickable
+        location_link = WebDriverWait(driver, 10).until(
+            EC.element_to_be_clickable((By.CLASS_NAME, "location-details-contact__flyer__link"))
+        )
+        location_link.click()
+
+        # Wait for a bit after clicking the link
+        WebDriverWait(driver, 5)
+
+    except Exception as e:
+        print(f"An error occurred: {e}")
+        driver.quit()
+        return None
 
     # driver.get("https://www.walmart.ca/en/stores-near-me")
     return driver
