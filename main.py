@@ -6,6 +6,7 @@ import argparse
 import selenium.webdriver.support.expected_conditions as EC
 import mysql.connector
 import os
+import datetime
 from dotenv import load_dotenv
 from dateutil.parser import isoparse
 from selenium.webdriver.common.by import By
@@ -181,8 +182,8 @@ def selenium_setup_loblaws():
 
 def setup_superstore():
     driver = make_driver()
-    driver.get("https://www.realcanadiansuperstore.ca/print-flyer")
-
+    driver.get('https://www.realcanadiansuperstore.ca/en/store-locator/details/1518?icta=pickup-details-modal')
+    time.sleep(7)
     cookie_more = {
         'name': 'flipp-store-code_2271',
         'value': '1518',
@@ -190,7 +191,11 @@ def setup_superstore():
         'path': '/'
     }
     driver.add_cookie(cookie_more)
-    driver.refresh()
+    # driver.refresh()
+    time.sleep(3)
+    location_link = driver.find_element(By.CLASS_NAME, "location-details-contact__flyer__link")
+    location_link.click()
+    time.sleep(2)
     return driver
 
 
@@ -647,7 +652,7 @@ def add_to_db(data, params):
                 json_data['product_name'],
                 json_data['data_product_id'],
                 json_data['savings'],
-                json_data['current_price'],
+                json_data.get('current_price', 0),
                 start_date,
                 end_date,
                 json_data.get('description', ''),

@@ -61,7 +61,8 @@ def main():
                 quantity,
                 product_type,
                 frozen,
-                see_more_link
+                see_more_link,
+                store
             FROM grocery
             -- Items whose sale period overlaps [today, next_friday]
             WHERE start_date <= %s
@@ -78,9 +79,10 @@ def main():
             flyer_path    = row[1]
             product_name  = row[2]
             see_more_link = row[13]
+            store = row[14]
 
             # Adjust your deduplication key as needed
-            dedup_key = (flyer_path, see_more_link, label, product_name)
+            dedup_key = (flyer_path, see_more_link, label, product_name, store)
             if dedup_key not in seen:
                 seen.add(dedup_key)
                 unique_rows.append(row)
@@ -88,14 +90,14 @@ def main():
         # 5. Call an LLM with the filtered items
         # Build a prompt listing the items on sale
         items_list = []
-        print(unique_rows)
         for row in unique_rows:
             label         = row[0]
             product_name  = row[2]
             savings       = row[4]
             current_price = row[5]
-            items_list.append(f"{label}: {product_name} - ${current_price}, save {savings}")
-        exit(1)
+            store = row[14]
+            items_list.append(f"{label}: {product_name} - ${current_price}, save {savings}, store {store}")
+
         prompt = (
             "I have the following items on sale from now until next Friday:\n"
             + "\n".join(items_list)
