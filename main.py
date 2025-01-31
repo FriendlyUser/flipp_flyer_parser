@@ -154,27 +154,61 @@ def parse_flipp_aside(driver, cfg)-> dict:
 def selenium_setup_saveon():
     # setup selenium manually by entering postal code
     driver = make_driver()
-    driver.get("https://www.saveonfoods.com/sm/pickup/rsid/907/circular")
+    driver.get("https://www.saveonfoods.com/sm/planning/rsid/907/circular")
     # driver.get("https://www.walmart.ca/en/stores-near-me")
     return driver
 
 def selenium_setup_walmart():
     # setup selenium manually by entering postal code
     driver = make_driver()
-    driver.get("https://www.walmart.ca/flyer?flyer_type=walmartcanada&store_code=1213&locale=en")
-    # driver.get("https://www.walmart.ca/en/stores-near-me")
+    driver.get('https://www.walmart.ca/en/stores-near-me/burnaby-sw-1213')
+
+     try:
+        # Wait for the "Set as My Store" button to be clickable
+        set_as_my_store_button = WebDriverWait(driver, 10).until(
+            EC.element_to_be_clickable((By.XPATH, "//button[text()='Set as My Store']"))
+        )
+        set_as_my_store_button.click()
+
+        # Wait for a bit after setting the store
+        time.sleep(3)
+
+        # Wait for the "View Flyers" button to be clickable and then click
+        view_flyers_button = WebDriverWait(driver, 10).until(
+            EC.element_to_be_clickable((By.XPATH, "//a[text()='View Flyers']"))
+        )
+        view_flyers_button.click()
+
+
+        WebDriverWait(driver, 10).until(
+            EC.url_contains("flyer?flyer_type=walmartcanada&store_code=1213&locale=en")
+        )
+
+
+    except Exception as e:
+        print(f"An error occurred: {e}")
+        driver.get("https://www.walmart.ca/flyer?flyer_type=walmartcanada&store_code=1213&locale=en")
+
     return driver
 
 def selenium_setup_loblaws():
     # setup selenium manually by entering postal code
     driver = make_driver()
     driver.get("https://www.loblaws.ca/en/store-locator/details/7491")
-    time.sleep(7)
-    # grab link location-details-contact__flyer__link
-    # and click
-    location_link = driver.find_element(By.CLASS_NAME, "location-details-contact__flyer__link")
-    location_link.click()
-    time.sleep(2)
+     try:
+        # Wait for the flyer link to be clickable
+        location_link = WebDriverWait(driver, 10).until(
+            EC.element_to_be_clickable((By.CLASS_NAME, "location-details-contact__flyer__link"))
+        )
+        location_link.click()
+
+        # Wait for a bit after clicking the link
+        WebDriverWait(driver, 5)
+
+    except Exception as e:
+        print(f"An error occurred: {e}")
+        driver.quit()
+        return None
 
     # driver.get("https://www.walmart.ca/en/stores-near-me")
     return driver
@@ -231,6 +265,8 @@ def setup_walmart():
         'name': 'walmart.nearestPostalCode',
         'value': 'V5H4M1',
     }
+    # https://www.walmart.ca/en/stores-near-me/burnaby-sw-1213
+    # then click my store and then click view flyers
     # Inject the cookie
     driver.add_cookie(cookie)
 
@@ -433,13 +469,35 @@ def scrap_flyer(driver, cfg: dict):
                 exit(1)
             time.sleep(5)
             # handle product details subsection
+            # handle save on differently some items not available
+            # small business here
             if cfg.get("type") != StoreType.SUPERSTORE:
                 flipp_aside_info = parse_flipp_aside(driver, cfg)
             # handle superstore
             else:
                 flipp_aside_info = {}
                 pass
-            
+            try:
+                product_details_links = quickview_container.find_elements(
+                    By.CSS_SELECTOR, ".product-details-link__link"
+                )
+        
+                see_more_links = []
+                if product_details_links:
+                     see_more_links = [link.get_attribute('href') for link in product_details_links]
+                else:
+                    all_links = quickview_container.find_elements(By.TAG_NAME, 'a')
+                    for link in all_links:
+                        if "View Product Details" in link.text:
+                            see_more_links.append(link.get_attribute('href'))
+                            break  # Only take the first matching link
+                
+                if see_more_links:
+                    flipp_aside_info['see_more_link'] = see_more_links[0]
+                else:
+                      print("No product details links found in the flipp aside.")
+            except Exception as e:
+                print("e", e)
             item_main_info.update(flipp_aside_info)
             # merge data
             # attempt to match for words, pack. or each.
