@@ -4,3 +4,4 @@ pillow
 mysql-connector-python
 psycopg2
 beautifulsoup4
+langchain

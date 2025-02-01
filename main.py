@@ -536,6 +536,9 @@ def scrap_flyer(driver, cfg: dict):
                     flipp_aside_info["see_more_link"] = f"{base_url}/{relative_see_more_link}"
                 else:
                     print("No product details links found in the flipp aside.")
+                    # hardcode it for save on, its not in the flyer and hard to get to
+                    if cfg.get("type") == StoreType.SAVEON:
+                        flipp_aside_info["see_more_link"] = "https://www.saveonfoods.com/sm/planning/rsid/907/circular"
                 
                 print("see_more_links:", see_more_links)
                 

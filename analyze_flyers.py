@@ -66,7 +66,8 @@ def main():
             FROM grocery
             -- Items whose sale period overlaps [today, next_friday]
             WHERE start_date <= %s
-              AND end_date >= %s
+              AND end_date >= %s 
+              AND store != 'saveon'
         """
         cursor.execute(query, (next_friday, today))
         rows = cursor.fetchall()
@@ -95,13 +96,17 @@ def main():
             product_name  = row[2]
             savings       = row[4]
             current_price = row[5]
+            see_more_link = row[13]
             store = row[14]
-            items_list.append(f"{label}: {product_name} - ${current_price}, save {savings}, store {store}")
+            items_list.append(f"{label}: {product_name} - ${current_price}, save {savings}, link: {see_more_link}, store {store}")
 
         prompt = (
             "I have the following items on sale from now until next Friday:\n"
             + "\n".join(items_list)
             + "\n\nCould you suggest what groceries I should buy and why?"
+            + "\nMake sure to include the **links to the items** at the end and mention the store they are from."
+            + "-------- ITEMS that are higher priority include \n\n"
+            + "Golden Pompano Fish, Silk, Garlic, Tomatoes, Pasta, SkyFlakes, Pork tenderloin, Blueberries, Strawberries, Bananas, Oranges, Pork Side Ribs, Pork Back Ribs, Ground Pork, Chicken Wings, Cereal, Bread, Coconut Bread, Sunflower Seeds"
         )
 
         # Make an OpenAI ChatCompletion request
