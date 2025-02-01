@@ -2,9 +2,10 @@ import undetected_chromedriver as uc
 import time
 import json
 import re
+import random
 import argparse
 import selenium.webdriver.support.expected_conditions as EC
-import mysql.connector
+from bs4 import BeautifulSoup
 import os
 import datetime
 from dotenv import load_dotenv
@@ -36,7 +37,7 @@ def make_driver():
     """
     driver = uc.Chrome(headless=False,use_subprocess=False)
 
-    driver.maximize_window()
+    # driver.maximize_window()
     return driver
 
 def swap_to_iframe(driver, iframe_class="flippiframe.mainframe"):
@@ -142,6 +143,9 @@ def parse_flipp_aside(driver, cfg)-> dict:
         see_more_link = see_more_ele.get_attribute("href")
     except Exception as e:
         see_more_link = ""
+
+    # if not see_more_link:
+        
     
     flipp_aside_data["see_more_link"] = see_more_link
     # driver.save_screenshot(f"data/{data_product_id}.png")
@@ -163,20 +167,25 @@ def selenium_setup_walmart():
     driver = make_driver()
     driver.get('https://www.walmart.ca/en/stores-near-me/burnaby-sw-1213')
 
-     try:
+    try:
         # Wait for the "Set as My Store" button to be clickable
         set_as_my_store_button = WebDriverWait(driver, 10).until(
             EC.element_to_be_clickable((By.XPATH, "//button[text()='Set as My Store']"))
         )
         set_as_my_store_button.click()
-
+        # between 1 and 5 seconds
+        lapse_rand = random.randint(1, 5)
         # Wait for a bit after setting the store
-        time.sleep(3)
+        time.sleep(lapse_rand)
 
         # Wait for the "View Flyers" button to be clickable and then click
         view_flyers_button = WebDriverWait(driver, 10).until(
             EC.element_to_be_clickable((By.XPATH, "//a[text()='View Flyers']"))
         )
+
+        lapse_rand = random.randint(1, 5)
+        # Wait for a bit after setting the store
+        time.sleep(lapse_rand)
         view_flyers_button.click()
 
 
@@ -195,7 +204,7 @@ def selenium_setup_loblaws():
     # setup selenium manually by entering postal code
     driver = make_driver()
     driver.get("https://www.loblaws.ca/en/store-locator/details/7491")
-     try:
+    try:
         # Wait for the flyer link to be clickable
         location_link = WebDriverWait(driver, 10).until(
             EC.element_to_be_clickable((By.CLASS_NAME, "location-details-contact__flyer__link"))
@@ -230,21 +239,6 @@ def setup_superstore():
     location_link = driver.find_element(By.CLASS_NAME, "location-details-contact__flyer__link")
     location_link.click()
     time.sleep(2)
-    return driver
-
-
-def setup_loblaws():
-    driver = make_driver()
-    driver.get("https://www.realcanadiansuperstore.ca/print-flyer")
-    cookie = {
-        'name': 'last_selected_store',
-        'value': '7491',
-        'domain': 'www.loblaws.ca',  # Ensure this matches the domain of the current page
-        'path': '/'
-    }
-
-    driver.add_cookie(cookie_more)
-    driver.refresh()
     return driver
 
 def setup_walmart():
@@ -473,31 +467,80 @@ def scrap_flyer(driver, cfg: dict):
             # small business here
             if cfg.get("type") != StoreType.SUPERSTORE:
                 flipp_aside_info = parse_flipp_aside(driver, cfg)
-            # handle superstore
             else:
                 flipp_aside_info = {}
                 pass
+            # handle superstore
             try:
-                product_details_links = quickview_container.find_elements(
-                    By.CSS_SELECTOR, ".product-details-link__link"
-                )
-        
+                # swap to main frame?
+                # Retrieve the entire HTML of the page
+                if cfg.get("type") == StoreType.SUPERSTORE:
+                    # swap to default content,
+                    driver.switch_to.default_content()
+                    # grab page source and swap to iframe
+                    html = driver.page_source
+                    swap_to_iframe(driver)
+                elif cfg.get("type") == StoreType.SAVEON:
+                    driver.switch_to.default_content()
+                    # grab page source and swap to iframe
+                    html = driver.page_source
+                    swap_to_iframe(driver)
+                elif cfg.get("type") == StoreType.LOBLAWS:
+                    # swap to default content,
+                    driver.switch_to.default_content()
+                    # grab page source and swap to iframe
+                    html = driver.page_source
+                    swap_to_iframe(driver)
+                else:
+                    html = driver.page_source
+                # Parse the HTML with BeautifulSoup
+                soup = BeautifulSoup(html, "html.parser")
+                # with open("data/superstore.html", "w", errors="ignore", encoding="utf-8") as f:
+                #     f.write(soup.prettify())
+                # Try to select elements with the class 'product-details-link__link'
+                product_details_links = soup.select(".product-details-link__link")
+                
                 see_more_links = []
                 if product_details_links:
-                     see_more_links = [link.get_attribute('href') for link in product_details_links]
+                    # Collect all href attributes from matching elements
+                    see_more_links = [
+                        link.get("href")
+                        for link in product_details_links
+                        if link.get("href")
+                    ]
                 else:
-                    all_links = quickview_container.find_elements(By.TAG_NAME, 'a')
+                    # If not found, scan all <a> elements for the text "View Product Details"
+                    all_links = soup.find_all("a")
+                    print("Scanning all <a> tags. Total links found:", len(all_links))
                     for link in all_links:
-                        if "View Product Details" in link.text:
-                            see_more_links.append(link.get_attribute('href'))
-                            break  # Only take the first matching link
+                        link_text = link.get_text(strip=True)
+
+                        if "view product details" in link_text.lower():
+                            see_more_links.append(link.get("href"))
+                            # Break after finding the first matching link
+                            break  
                 
                 if see_more_links:
-                    flipp_aside_info['see_more_link'] = see_more_links[0]
+                    relative_see_more_link = see_more_links[0]
+                    if cfg.get("type") == StoreType.WALMART:
+                        base_url = "https://www.walmart.ca"
+                    elif cfg.get("type") == StoreType.SUPERSTORE:
+                        base_url = "https://www.realcanadiansuperstore.ca"
+                    elif cfg.get("type") == StoreType.SAVEON:
+                        base_url = "https://www.saveonfoods.com"
+                    elif cfg.get("type") == StoreType.LOBLAWS:
+                        base_url = "https://www.loblaws.ca"
+                    else:
+                        raise Exception("Not implemented yet")
+                    # Update your dictionary with the first found link
+                    flipp_aside_info["see_more_link"] = f"{base_url}/{relative_see_more_link}"
                 else:
-                      print("No product details links found in the flipp aside.")
+                    print("No product details links found in the flipp aside.")
+                
+                print("see_more_links:", see_more_links)
+                
             except Exception as e:
-                print("e", e)
+                print("An error occurred:", e)
             item_main_info.update(flipp_aside_info)
             # merge data
             # attempt to match for words, pack. or each.
@@ -726,7 +769,7 @@ def add_to_db(data, params):
             # Execute and commit
             cursor.execute(insert_grocery, data_grocery)
         
-        conn.commit()
+            conn.commit()
 
     except psycopg2.Error as err:
         print(f"Error: {err}")
@@ -739,75 +782,6 @@ def add_to_db(data, params):
             cursor.close()
             conn.close()
             print("PostgreSQL connection is closed")
-
-def add_to_db_sql(data):
-
-    db_user = os.getenv('DB_USER')
-    db_password = os.getenv('DB_PASSWORD')
-    db_host = os.getenv('DB_HOST')
-    db_name = os.getenv('DB_NAME')
-    # Database connection parameters
-    db_config = {
-        'user': db_user,
-        'password': db_password,
-        'host': db_host,
-        'database': db_name,
-        'raise_on_warnings': True
-    }
-
-    try:
-        # Connect to the database
-        cnx = mysql.connector.connect(**db_config)
-
-        # Prepare a cursor object using cursor() method
-        cursor = cnx.cursor()
-
-        # SQL insert statement
-        add_grocery = ("INSERT INTO grocery "
-                    "(label, flyer_path, product_name, data_product_id, savings, current_price, start_date, end_date, description, size, quantity, product_type, frozen, see_more_link) "
-                    "VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)")
-
-        for json_data in data:
-            # Data to be inserted
-            start_date = json_data['start_date']
-            # modify start_date to YYYY-MM-DD
-            start_date = start_date[:10]
-            end_date = json_data['end_date']
-            # modify end_date to YYYY-MM-DD
-            # make sure size is either a valid number or null
-            end_date = end_date[:10]
-            data_grocery = (
-                json_data['label'],
-                json_data['flyer_path'],
-                json_data['product_name'],
-                json_data['data_product_id'],
-                json_data['savings'],
-                json_data['current_price'],
-                start_date,
-                end_date,
-                json_data['description'],
-                json_data['size'],
-                json_data['quantity'],
-                json_data['product_type'],
-                json_data['frozen'],
-                json_data['see_more_link']
-            )
-
-            # Execute the SQL command
-            cursor.execute(add_grocery, data_grocery)
-
-            # Commit the changes in the database
-            cnx.commit()
-
-    except mysql.connector.Error as err:
-        print(f"Error: {err}")
-
-    finally:
-        if cnx.is_connected():
-            # Close the cursor and connection
-            cursor.close()
-            cnx.close()
-            print("MySQL connection is closed")
 
 
 
@@ -851,7 +825,7 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     # argument type with 3 options: saveon, walmart, and superstore
     # argparse with enum
-    parser.add_argument("-t", '--type', type=str, choices=['saveon', 'walmart', 'superstore', 'loblaws'], default="walmart")
+    parser.add_argument("-t", '--type', type=str, choices=['saveon', 'walmart', 'superstore', 'loblaws'], default="saveon")
     # convert type to enum
     # Parse the command-line arguments
     args = parser.parse_args()

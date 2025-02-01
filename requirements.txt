@@ -3,3 +3,4 @@ python-dotenv
 pillow
 mysql-connector-python
 psycopg2
+beautifulsoup4
