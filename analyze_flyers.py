@@ -23,7 +23,7 @@ def init_llm():
 
     GOOGLE_API_KEY = os.environ.get("GOOGLE_API_KEY")
 
-    llm = GoogleGenerativeAI(model="gemini-pro", api_key=GOOGLE_API_KEY)
+    llm = GoogleGenerativeAI(model="gemini-2.0-flash", api_key=GOOGLE_API_KEY)
     composed_chain = twitter_prompt | llm
     return composed_chain
 

@@ -680,6 +680,8 @@ def add_to_db(data, params):
         store_type = store_type.value
     else:
         store_type = str(store_type)
+
+    print("store_type: ", store_type)
     try:
         # Connect to PostgreSQL
         conn = psycopg2.connect(
@@ -749,17 +751,24 @@ def add_to_db(data, params):
                 
                 # 3) Format as YYYY-MM-DD
                 end_date = end_dt.strftime('%Y-%m-%d')
+            current_price = json_data.get('current_price', 0)
+            if not current_price:
+                current_price = 0
 
+            # json_data.get('description', '') cap at 255 characters
+            description = json_data.get('description', '')
+            if len(description) > 255:
+                description = description[:255]
             data_grocery = (
                 json_data['label'],
                 json_data['flyer_path'],
                 json_data['product_name'],
-                json_data['data_product_id'],
+                json_data.get('data_product_id', 0),
                 json_data['savings'],
-                json_data.get('current_price', 0),
+                current_price,
                 start_date,
                 end_date,
-                json_data.get('description', ''),
+                description,
                 json_data.get('size'),
                 json_data.get('quantity'),
                 json_data.get('product_type'),
