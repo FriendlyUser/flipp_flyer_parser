@@ -226,19 +226,23 @@ def selenium_setup_loblaws():
 def setup_superstore():
     driver = make_driver()
     driver.get('https://www.realcanadiansuperstore.ca/en/store-locator/details/1518?icta=pickup-details-modal')
-    time.sleep(7)
-    cookie_more = {
-        'name': 'flipp-store-code_2271',
-        'value': '1518',
-        'domain': 'www.realcanadiansuperstore.ca',  # Ensure this matches the domain of the current page
-        'path': '/'
-    }
-    driver.add_cookie(cookie_more)
-    # driver.refresh()
-    time.sleep(3)
-    location_link = driver.find_element(By.CLASS_NAME, "location-details-contact__flyer__link")
-    location_link.click()
-    time.sleep(2)
+    try:
+        time.sleep(7)
+        cookie_more = {
+            'name': 'flipp-store-code_2271',
+            'value': '1518',
+            'domain': 'www.realcanadiansuperstore.ca',  # Ensure this matches the domain of the current page
+            'path': '/'
+        }
+        driver.add_cookie(cookie_more)
+        driver.refresh()
+        time.sleep(15)
+        location_link = driver.find_element(By.CLASS_NAME, "location-details-contact__flyer__link")
+        location_link.click()
+        time.sleep(3)
+    except Exception as e:
+        print("Move to the flyer page before proceeding")
+        input("Press enter to continue")
     return driver
 
 def setup_walmart():
@@ -264,23 +268,23 @@ def setup_walmart():
     # Inject the cookie
     driver.add_cookie(cookie)
 
-    shipping_address = {
-        "name": "walmart.shippingPostalCode",
-        "value": "V5H4M1"
-    }
-    driver.add_cookie(shipping_address)
+    # shipping_address = {
+    #     "name": "walmart.shippingPostalCode",
+    #     "value": "V5H4M1"
+    # }
+    # driver.add_cookie(shipping_address)
 
-    preferred_store = {
-        'name': "walmart.preferredstore",
-        'value': "1213"
-    }
+    # preferred_store = {
+    #     'name': "walmart.preferredstore",
+    #     'value': "1213"
+    # }
 
-    geolocation_cookie = {
-        'name': "walmart.nearestLatLng",
-        'value': '"49.2311,-122.956"'
-    }
+    # geolocation_cookie = {
+    #     'name': "walmart.nearestLatLng",
+    #     'value': '"49.2311,-122.956"'
+    # }
 
-    driver.add_cookie(preferred_store)
+    # driver.add_cookie(preferred_store)
     
     # Refresh the page to apply the cookie changes
     driver.refresh()
@@ -333,7 +337,7 @@ def scrap_flyer(driver, cfg: dict):
     if main_flyer:
         print("Found main flyer")
     else:
-        main_flyer = iframe.find_element(By.TAG_NAME, "sfml-linear-layout")
+        # main_flyer = iframe.find_element(By.TAG_NAME, "sfml-linear-layout")
         raise Exception("Could not find main flyer")
     # click on first item in iframe
 

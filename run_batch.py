@@ -2,8 +2,8 @@ import subprocess
 import time
 
 def run_all():
-    args = ["walmart", "superstore", "loblaws", "saveon"]
-    # args = ["superstore", "loblaws", "saveon"]
+    # args = ["walmart", "superstore", "loblaws", "saveon"]
+    args = ["superstore", "loblaws", "saveon"]
     # args = ["loblaws", "saveon"]
     # args = ["superstore", "loblaws"]
     for arg in args:

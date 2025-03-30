@@ -106,7 +106,10 @@ def main():
             + "\n\nCould you suggest what groceries I should buy and why?"
             + "\nMake sure to include the **links to the items** at the end and mention the store they are from."
             + "-------- ITEMS that are higher priority include \n\n"
-            + "Golden Pompano Fish, Silk, Garlic, Tomatoes, Pasta, SkyFlakes, Pork tenderloin, Blueberries, Strawberries, Bananas, Oranges, Pork Side Ribs, Pork Back Ribs, Ground Pork, Chicken Wings, Cereal, Bread, Coconut Bread, Sunflower Seeds"
+            + "Golden Pompano Fish, Silk, Garlic, Tomatoes, Pasta, SkyFlakes"
+            + "Pork tenderloin, Blueberries, Strawberries, Bananas, Oranges, Pork Side Ribs, Pork Back Ribs, Short Ribs"
+            + "Ground Pork, Chicken Wings, Cereal, Bread, Coconut Bread, Sunflower Seeds, Sunflower Seeds"
+            + "Chicken Breast, Pokemon Snacks, Kettle Chips"
         )
 
         # Make an OpenAI ChatCompletion request
@@ -118,6 +121,12 @@ def main():
         print("=== Grocery Recommendations ===")
         print(response)
         print("===============================")
+        import markdown
+        # save markdown as html to file
+        with open("grocery_recommendations.html", "a", errors="ignore", encoding="utf-8") as f:
+            # convert response to html
+            html_response = markdown.markdown(response)
+            f.write(html_response)
 
     except psycopg2.Error as e:
         print(f"Database error: {e}")
