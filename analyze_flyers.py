@@ -118,12 +118,12 @@ def main():
             + "\n".join(items_list)
             + "\n\nCould you suggest what groceries I should buy and why?"
             + "\nPlease prioritize items based on value (savings/price) and usefulness."
-            + "\nMake sure to include the **links to the items** at the end and mention the store they are from."
+            + "\nMake sure to include the **links to the items** at the end and mention the store they are from with the price if available."
             + "-------- ITEMS that are higher priority include \n\n"
             + "Golden Pompano Fish, Silk, Garlic, Tomatoes, Pasta, SkyFlakes"
             + "Pork tenderloin, Blueberries, Strawberries, Bananas, Oranges, SkyFlakes crackers, Pork tenderloin, Short Ribs"
             + "Ground Pork, Chicken Wings, Cereal, Bread, Coconut Bread, Sunflower Seeds, Sunflower Seeds"
-            + "Chicken Breast, Pokemon Snacks, Kettle Chips"
+            + "Chicken Breast, Pokemon Snacks, Kettle Chips, blueberries, strawberries"
         )
 
         # 6. Call the LLM using agno Agent
@@ -131,7 +131,7 @@ def main():
         # Using Google AI Studio authentication (requires GOOGLE_API_KEY env var)
         # Using gemini-1.5-flash as recommended, but you can change to "gemini-2.0-flash"
         # Note: Ensure the model ID you use is available via Google AI Studio API Key
-        gemini_model = Gemini(id="gemini-1.5-flash") # Or "gemini-2.0-flash" if preferred/available
+        gemini_model = Gemini(id="gemini-2.0-flash") # Or "gemini-2.0-flash" if preferred/available
 
         agent = Agent(
             model=gemini_model,
@@ -152,7 +152,7 @@ def main():
         # save markdown as html to file
         with open("grocery_recommendations.html", "a", errors="ignore", encoding="utf-8") as f:
             # convert response to html
-            html_response = markdown.markdown(response)
+            html_response = markdown.markdown(response.content)
             f.write(html_response)
 
     except psycopg2.Error as e:

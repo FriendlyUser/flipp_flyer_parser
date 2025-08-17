@@ -2,10 +2,10 @@ import subprocess
 import time
 
 def run_all():
-    # args = ["walmart", "superstore", "loblaws", "saveon"]
-    args = ["superstore", "loblaws", "saveon"]
+    args = ["superstore", "walmart", "loblaws", "saveon"]
+    # args = ["walmart", "loblaws", "saveon"]
     # args = ["loblaws", "saveon"]
-    # args = ["superstore", "loblaws"]
+    # args = ["loblaws"]
     for arg in args:
         print(f"Running main.py with argument: {arg}")
         # subprocess.run blocks until the command finishes

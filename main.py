@@ -1,4 +1,4 @@
-import undetected_chromedriver as uc
+import nodriver as uc
 import time
 import json
 import re
@@ -29,25 +29,29 @@ class StoreType(Enum):
     LOBLAWS = 'loblaws'
 
 
-def make_driver():
+async def make_driver():
     """
     Create and configure a Chrome WebDriver instance with a headless option and a subprocess option disabled.
 
     Return the configured WebDriver instance.
     """
-    driver = uc.Chrome(headless=False,use_subprocess=False)
+    driver = await uc.start()
+    # driver = uc.Chrome(headless=False,use_subprocess=False)
 
     # driver.maximize_window()
     return driver
 
-def swap_to_iframe(driver, iframe_class="flippiframe.mainframe"):
-    driver.switch_to.default_content()
+async def swap_to_iframe(tab: uc.Tab, iframe_class="flippiframe.mainframe"):
+    # tab.switch_to.default_content()
     # Switch to the iframe
-    iframe = driver.find_element(By.CLASS_NAME, iframe_class)
-    # then find frame and swap
-    if not iframe:
-        raise Exception("iframe not found, likely changes in the flipp template")
-    driver.switch_to.frame(iframe)
+    # iframe = tab.select(By.CLASS_NAME, iframe_class)
+    # iframe = await tab.select(By.CLASS_NAME, iframe_class)
+    # # then find frame and swap
+    # if not iframe:
+    #     raise Exception("iframe not found, likely changes in the flipp template")
+    # assuming we dont need to swap to iframe anymore
+    # driver.switch_to.frame(iframe)
+    pass 
 
 
 def parse_flipp_aside(driver, cfg)-> dict:
@@ -155,32 +159,45 @@ def parse_flipp_aside(driver, cfg)-> dict:
     return flipp_aside_data
 
 
-def selenium_setup_saveon():
+async def selenium_setup_saveon():
     # setup selenium manually by entering postal code
-    driver = make_driver()
-    driver.get("https://www.saveonfoods.com/sm/planning/rsid/907/circular")
+    driver = await make_driver()
+    tab = driver.get("https://www.saveonfoods.com/sm/planning/rsid/907/circular")
     # driver.get("https://www.walmart.ca/en/stores-near-me")
-    return driver
+    return tab
 
-def selenium_setup_walmart():
+async def setup_walmart():
     # setup selenium manually by entering postal code
-    driver = make_driver()
-    driver.get('https://www.walmart.ca/en/stores-near-me/burnaby-sw-1213')
+    driver = await make_driver()
+    tab: uc.Tab = driver.get('https://www.walmart.ca/en/stores-near-me/burnaby-sw-1213')
 
     try:
         # Wait for the "Set as My Store" button to be clickable
-        set_as_my_store_button = WebDriverWait(driver, 10).until(
-            EC.element_to_be_clickable((By.XPATH, "//button[text()='Set as My Store']"))
+        # set_as_my_store_button = WebDriverWait(driver, 10).until(
+        #     EC.element_to_be_clickable((By.XPATH, "//button[text()='Set as My Store']"))
+        # )
+        set_as_my_store_button = await tab.find(
+            text='Set as My Store', 
+            timeout=10
         )
-        set_as_my_store_button.click()
+        if set_as_my_store_button:
+            print("Button found! Clicking it.")
+            await set_as_my_store_button.click()
+        else:
+            print("Button not found within the timeout period.")
+
         # between 1 and 5 seconds
         lapse_rand = random.randint(1, 5)
         # Wait for a bit after setting the store
         time.sleep(lapse_rand)
 
         # Wait for the "View Flyers" button to be clickable and then click
-        view_flyers_button = WebDriverWait(driver, 10).until(
-            EC.element_to_be_clickable((By.XPATH, "//a[text()='View Flyers']"))
+        # view_flyers_button = WebDriverWait(driver, 10).until(
+        #     EC.element_to_be_clickable((By.XPATH, "//a[text()='View Flyers']"))
+        # )
+        view_flyers_button = await tab.find(
+            text='View Flyers', 
+            timeout=10
         )
 
         lapse_rand = random.randint(1, 5)
@@ -189,9 +206,12 @@ def selenium_setup_walmart():
         view_flyers_button.click()
 
 
-        WebDriverWait(driver, 10).until(
-            EC.url_contains("flyer?flyer_type=walmartcanada&store_code=1213&locale=en")
-        )
+        # WebDriverWait(driver, 10).until(
+        #     EC.url_contains("flyer?flyer_type=walmartcanada&store_code=1213&locale=en")
+        # )
+        # current_url = await tab.get_url()
+        # if "flyer?flyer_type=walmartcanada&store_code=1213&locale=en" in current_url:
+        #     print("Successfully navigated to the flyer page.")
 
 
     except Exception as e:
@@ -245,7 +265,7 @@ def setup_superstore():
         input("Press enter to continue")
     return driver
 
-def setup_walmart():
+async def setup_walmart():
     """
     Sets up the Walmart web scraping environment by:
     1. Creating a driver using the make_driver() function.
@@ -256,17 +276,17 @@ def setup_walmart():
     Returns:
         driver (WebDriver): The WebDriver instance for interacting with the Walmart website.
     """
-    driver = make_driver()
+    driver = await make_driver()
 
-    driver.get("https://www.walmart.ca/flyer?flyer_type=walmartcanada&store_code=1213&locale=en")
-    cookie = {
+    tab = await driver.get("https://www.walmart.ca/flyer?flyer_type=walmartcanada&store_code=1213&locale=en")
+    cookies = await tab.send(uc.cdp.storage.get_cookies())
+    print(cookies)
+    cookie = json.dumps({
         'name': 'walmart.nearestPostalCode',
         'value': 'V5H4M1',
-    }
-    # https://www.walmart.ca/en/stores-near-me/burnaby-sw-1213
-    # then click my store and then click view flyers
-    # Inject the cookie
-    driver.add_cookie(cookie)
+    })
+    # cookies.append(cookie)
+    await tab.send(uc.cdp.storage.set_cookies(cookies))
 
     # shipping_address = {
     #     "name": "walmart.shippingPostalCode",
@@ -286,13 +306,11 @@ def setup_walmart():
 
     # driver.add_cookie(preferred_store)
     
-    # Refresh the page to apply the cookie changes
-    driver.refresh()
     print("try again")
-    return driver
+    return tab
 
 
-def scrap_flyer(driver, cfg: dict):
+async def scrap_flyer(tab: uc.Tab, cfg: dict):
     """
     Scrapes a flipp flyer using a Selenium WebDriver and saves the data to a JSON file.
 
@@ -305,35 +323,39 @@ def scrap_flyer(driver, cfg: dict):
     """
     print("Scrapping flyer")
     try:
-        main_element = WebDriverWait(driver, 10).until(EC.visibility_of_element_located((By.TAG_NAME, "main")))
+        # main_element = WebDriverWait(driver, 10).until(EC.visibility_of_element_located((By.TAG_NAME, "main")))
+        main_element = await tab.find("main", timeout=10)
+        url = tab.url
+        print("url", url)
     except Exception as e:
         # save page source
         error_file = cfg.get("error_file", "error_walmart.html")
+        page_content = tab.get_content()
         with open(error_file, "w", errors="ignore", encoding="utf-8") as f:
-            f.write(driver.page_source)
+            f.write(page_content)
         time.sleep(3)
     time.sleep(5)
     # Switch to the iframe
-    swap_to_iframe(driver)
+    await swap_to_iframe(tab)
     # save content as data/walmart.html
-    cookies = driver.get_cookies()
+    cookies = await tab.send(uc.cdp.storage.get_cookies())
     # save cookies are cookies.json
     cookies_file = cfg.get("cookies_file", "data/cookies.json")
     # check if data directory exists, if not create it
     if not os.path.exists("data"):
         os.makedirs("data")
-    with open(cookies_file, "w") as f:
-        json.dump(cookies, f)
+    # with open(cookies_file, "w") as f:
+    #     json.dump(cookies, f)
     
     # get source html for driver
-    html = driver.page_source
+    html = await tab.get_content()
 
     html_file = cfg.get("html_file", "data/walmart.html")
     # save to data/html
     with open(html_file, "w", errors="ignore", encoding="utf-8") as f:
         f.write(html)
 
-    main_flyer = driver.find_element(By.XPATH, "/html/body/flipp-router")
+    main_flyer = await tab.find("flipp-router")
     if main_flyer:
         print("Found main flyer")
     else:
@@ -343,7 +365,7 @@ def scrap_flyer(driver, cfg: dict):
 
     time.sleep(7)
     # get all tags named sfml-flyer-image from main_flyer and loop through them
-    flyer_images = main_flyer.find_elements(By.TAG_NAME, "sfml-flyer-image")
+    flyer_images = await tab.find_all("sfml-flyer-image")
     if flyer_images:
         print("Found flyer")
         # filter images for "save on" to ensure
@@ -368,19 +390,27 @@ def scrap_flyer(driver, cfg: dict):
         # activeModal = driver.find_element(By.CLASS_NAME, "acsCloseButton")
         # activeModal.click()
         # acsDeclineButton
-        activeModal = driver.find_element(By.CLASS_NAME, "acsAbandonButton")
+        activeModal = tab.find("acsAbandonButton")
         activeModal.click()
     except Exception as e:
         print("No active modal found")
 
     parsed_labels = []
     for findex, flyer_image in enumerate(flyer_images):
-
+        
         # get each button from flyer
-        driver.execute_script("arguments[0].scrollIntoView();", flyer_image)
-        buttons = flyer_image.find_elements(By.TAG_NAME, "button")
+        flyer_image_uc: uc.Element = flyer_image
+        # driver.execute_script("arguments[0].scrollIntoView();", flyer_image)
+        # tab.evaluate("arguments[0].scrollIntoView();", flyer_image)
+        await flyer_image_uc.scroll_into_view()
+        buttons = await flyer_image_uc.query_selector("button")
         # extract path from flyer_image
-        flyer_path = flyer_image.get_attribute("path")
+        flyer_attributes = flyer_image_uc.attributes
+        # assuming list print and exit
+        print(flyer_attributes)
+        flyer_path = flyer_attributes.get("src")
+        print(flyer_path)
+        exit(1)
         # iterate through each button
         for index, button in enumerate(buttons):
             # click on button
@@ -567,18 +597,18 @@ def scrap_flyer(driver, cfg: dict):
     with open(data_file, 'w') as f:
         json.dump(data, f)
 
-    driver.switch_to.default_content()
+    # driver.switch_to.default_content()
 
     return cfg
 
-def get_walmart():
+async def get_walmart():
     """
     Get the information about Walmart.
     Returns:
         None
     """
 
-    driver = selenium_setup_walmart()
+    tab = await setup_walmart()
     cfg = {
         'url': "https://www.walmart.ca/flyer?locale=en&icid=home+page_HP_Header_Groceries_WM",
         'postal_code': "V5H 4M1",
@@ -593,7 +623,7 @@ def get_walmart():
         'type': StoreType("walmart"),
     }
     time.sleep(2)
-    scrap_flyer(driver, cfg)
+    await scrap_flyer(tab, cfg)
     return cfg
 
 def get_saveon():
@@ -801,7 +831,7 @@ def add_to_db(data, params):
 
 
 
-def main(args):
+async def main(args):
     type_value = args.type
     # convert type_value to enum
 
@@ -811,7 +841,7 @@ def main(args):
         cfg = get_saveon()
     elif store_value == StoreType.WALMART:
         # Do something for walmart option
-        cfg = get_walmart()
+        cfg = await get_walmart()
     elif store_value == StoreType.SUPERSTORE:
         # Do something for superstore option
         cfg = get_superstore()
@@ -828,24 +858,26 @@ def main(args):
     if os.path.exists(data_file):
         # read data file and sync with db, add current date as argument.
         # read data from data_file into dictionary
-        with open(data_file, 'r') as f:
-            json_data = json.load(f)
-        # save data to db
-        print("what is json data: ", json_data)
-        add_to_db(json_data, cfg)
+        # with open(data_file, 'r') as f:
+        #     json_data = json.load(f)
+        # # save data to db
+        # print("what is json data: ", json_data)
+        # add_to_db(json_data, cfg)
+        pass
     else:
         pass
 
 if __name__ == '__main__':
-    # argparser with the following arguments type
+    # Set up the argument parser to get command-line arguments
     parser = argparse.ArgumentParser()
-    # argument type with 3 options: saveon, walmart, and superstore
-    # argparse with enum
-    parser.add_argument("-t", '--type', type=str, choices=['saveon', 'walmart', 'superstore', 'loblaws'], default="saveon")
-    # convert type to enum
-    # Parse the command-line arguments
+    parser.add_argument(
+        "-t", '--type', 
+        type=str, 
+        choices=['saveon', 'walmart', 'superstore', 'loblaws'], 
+        default="walmart"
+    )
     args = parser.parse_args()
 
-    # Access the value of the "type" argument
-    main(args)
-    # get_walmart()
+    # Run the main async function using the event loop
+    # The 'args' object must be passed to your main function
+    uc.loop().run_until_complete(main(args))
